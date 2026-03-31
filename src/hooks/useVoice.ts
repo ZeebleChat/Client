@@ -1,8 +1,3 @@
-/**
- * Voice channel hook using LiveKit for real-time audio/video.
- * Handles microphone access, room connection, participant tracking,
- * mute/deafen, screen sharing, and audio level metering.
- */
 import { useState, useRef, useCallback } from 'react';
 import { getServerUrl } from '../config';
 import { getChatToken } from '../auth';
@@ -12,7 +7,7 @@ const MIC_LEVEL_MULTIPLIER = 400;
 const MIC_METER_INTERVAL_MS = 80;
 const VOICE_TOKEN_RETRY_DELAY_MS = 800;
 
-// ── LiveKit globals from the UMD bundle loaded in index.html ─────────────────
+// LiveKit types from the UMD bundle loaded in index.html
 declare global {
   interface Window {
     LivekitClient: {
@@ -41,8 +36,6 @@ interface LiveKitParticipant {
   audioTrackPublications: Map<string, { isMuted: boolean }>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 export interface Participant {
@@ -61,8 +54,8 @@ export interface VoiceState {
   status: VoiceStatus;
   channel: ApiChannel | null;
   participants: Participant[];
-  micLevel: number;       // 0-100
-  micSilent: boolean;     // true when no audio detected for several seconds
+  micLevel: number;
+  micSilent: boolean;
   errorMsg: string;
   isMuted: boolean;
   isDeafened: boolean;
@@ -97,7 +90,6 @@ export function useVoice() {
   const screenTrackRef = useRef<{ mediaStreamTrack: MediaStreamTrack; stop(): void } | null>(null);
   const screenUnlistenRef = useRef<(() => void) | null>(null);
   const screenCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Tracks remote screen shares for cleanup; state holds the MediaStream for React rendering
   const remoteScreenTracksRef = useRef<Array<{ identity: string; nativeTrack: MediaStreamTrack; stream: MediaStream }>>([]);
 
   function set(patch: Partial<VoiceState>) {
@@ -149,7 +141,7 @@ export function useVoice() {
       source.connect(analyser);
       const data = new Uint8Array(analyser.frequencyBinCount);
       let silentTicks = 0;
-      const SILENCE_THRESHOLD_TICKS = Math.ceil(5000 / MIC_METER_INTERVAL_MS); // 5 s
+      const SILENCE_THRESHOLD_TICKS = Math.ceil(5000 / MIC_METER_INTERVAL_MS);
 
       micIntervalRef.current = setInterval(() => {
         analyser.getByteTimeDomainData(data);
@@ -164,23 +156,17 @@ export function useVoice() {
 
         if (level === 0) {
           silentTicks++;
-          if (silentTicks >= SILENCE_THRESHOLD_TICKS) {
-            set({ micSilent: true });
-          }
+          if (silentTicks >= SILENCE_THRESHOLD_TICKS) set({ micSilent: true });
         } else {
           silentTicks = 0;
           set({ micSilent: false });
         }
       }, MIC_METER_INTERVAL_MS);
-    } catch {
-      // mic meter unavailable — non-fatal
-    }
+    } catch { /* non-fatal */ }
   }
 
   const join = useCallback(async (channel: ApiChannel) => {
-    // Already connected to this exact channel — do nothing
     if (stateRef.current.status === 'connected' && stateRef.current.channel?.id === channel.id) return;
-    // Already connecting — ignore extra clicks
     if (stateRef.current.status === 'connecting') return;
     if (roomRef.current) await leave();
     const gen = ++connGenRef.current;
@@ -199,21 +185,18 @@ export function useVoice() {
       return;
     }
 
-    // 1. Request mic
     let micStream: MediaStream;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (connGenRef.current !== gen) return; // superseded
-      const micTrack = micStream.getAudioTracks()[0];
-      micTrackRef.current = micTrack;
-      localTrackRef.current = new window.LivekitClient.LocalAudioTrack(micTrack);
+      if (connGenRef.current !== gen) return;
+      micTrackRef.current = micStream.getAudioTracks()[0];
+      localTrackRef.current = new window.LivekitClient.LocalAudioTrack(micTrackRef.current);
     } catch {
       if (connGenRef.current !== gen) return;
       set({ status: 'error', errorMsg: 'Microphone permission denied' });
       return;
     }
 
-    // 2. Fetch voice token (retry once on 409 — server may not have processed the disconnect yet)
     let voiceToken: string;
     let livekitUrl: string;
     try {
@@ -230,7 +213,7 @@ export function useVoice() {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      if (connGenRef.current !== gen) return; // superseded
+      if (connGenRef.current !== gen) return;
       const data = await res.json();
       voiceToken = data.token;
       livekitUrl = data.livekit_url;
@@ -240,10 +223,8 @@ export function useVoice() {
       return;
     }
 
-    // 3. Connect to LiveKit room using the bundled SDK
     const room = new window.LivekitClient.Room();
     roomRef.current = room;
-
     const RoomEvent = window.LivekitClient.RoomEvent;
 
     room.on(RoomEvent.TrackSubscribed, (track: unknown, _pub: unknown, participant: unknown) => {
@@ -276,15 +257,13 @@ export function useVoice() {
       }
     });
 
-    const refreshParticipants = () =>
-      set({ participants: buildParticipants(room) });
-
+    const refreshParticipants = () => set({ participants: buildParticipants(room) });
     room.on(RoomEvent.ParticipantConnected, refreshParticipants);
     room.on(RoomEvent.ParticipantDisconnected, refreshParticipants);
     room.on(RoomEvent.ActiveSpeakersChanged, refreshParticipants);
 
     room.on(RoomEvent.Disconnected, () => {
-      if (connGenRef.current !== gen) return; // stale — a newer join is in progress
+      if (connGenRef.current !== gen) return;
       detachRemoteAudio();
       detachRemoteScreens();
       stopMicMeter();
@@ -295,22 +274,21 @@ export function useVoice() {
       await room.connect(livekitUrl, voiceToken);
       if (connGenRef.current !== gen) { room.disconnect(); return; }
       await room.startAudio();
-      if (localTrackRef.current) {
-        await room.localParticipant.publishTrack(localTrackRef.current);
-      }
+      if (localTrackRef.current) await room.localParticipant.publishTrack(localTrackRef.current);
       set({ status: 'connected', channel, participants: buildParticipants(room) });
       startMicMeter(micStream);
     } catch (e) {
       if (connGenRef.current !== gen) return;
       set({ status: 'error', errorMsg: `Connection failed: ${(e as Error).message}` });
     }
+  // join references only refs and stable functions
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleMute = useCallback(() => {
     const track = micTrackRef.current;
     if (!track) return;
-    const nowMuted = track.enabled; // track.enabled=true means currently unmuted → we're muting
+    const nowMuted = track.enabled;
     track.enabled = !nowMuted;
     set({ isMuted: nowMuted });
   }, []);
@@ -348,10 +326,8 @@ export function useVoice() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const { listen } = await import('@tauri-apps/api/event');
-
       await invoke('start_screen_capture', { sourceId });
 
-      // Create an off-screen canvas that receives JPEG frames from Rust
       const canvas = document.createElement('canvas');
       canvas.width = 1280;
       canvas.height = 720;
@@ -365,11 +341,9 @@ export function useVoice() {
       });
       screenUnlistenRef.current = unlisten;
 
-      // Wrap the canvas stream as a LiveKit track
       const stream = canvas.captureStream(15);
       const videoTrack = stream.getVideoTracks()[0];
       const livekitTrack = new window.LivekitClient.LocalVideoTrack(videoTrack);
-
       screenTrackRef.current = {
         mediaStreamTrack: videoTrack,
         stop: () => { videoTrack.stop(); stream.getTracks().forEach(t => t.stop()); },
@@ -377,7 +351,6 @@ export function useVoice() {
 
       await room.localParticipant.publishTrack(livekitTrack);
       set({ isScreenSharing: true });
-
       videoTrack.addEventListener('ended', () => stopScreenShare(), { once: true });
     } catch (e) {
       console.error('Screen capture failed:', e);
@@ -387,14 +360,11 @@ export function useVoice() {
 
   const toggleScreenShare = useCallback(() => {
     if (!roomRef.current || stateRef.current.status !== 'connected') return;
-
     if (stateRef.current.isScreenSharing) {
       stopScreenShare();
     } else if ('__TAURI_INTERNALS__' in window) {
-      // Show Zeeble's custom picker
       set({ showScreenPicker: true });
     } else {
-      // Browser fallback — use native getDisplayMedia via LiveKit
       window.LivekitClient.createLocalScreenTracks({ audio: false }).then(tracks => {
         if (!tracks.length) return;
         const screenTrack = tracks[0];
@@ -415,10 +385,7 @@ export function useVoice() {
     detachRemoteAudio();
     detachRemoteScreens();
     stopScreenShare();
-    if (roomRef.current) {
-      roomRef.current.disconnect();
-      roomRef.current = null;
-    }
+    if (roomRef.current) { roomRef.current.disconnect(); roomRef.current = null; }
     if (localTrackRef.current) {
       (localTrackRef.current as { stop(): void }).stop?.();
       localTrackRef.current = null;

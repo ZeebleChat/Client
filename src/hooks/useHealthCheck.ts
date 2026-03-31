@@ -38,7 +38,6 @@ export function useHealthCheck(authed: boolean, activeServerUrl: string): Health
     const result = await validateToken();
     if (result === 'invalid') {
       transition('session_expired');
-      // forceLogout dispatches 'zeeble-logout' which App.tsx already listens to → setAuthed(false)
       setTimeout(() => forceLogout(), 1500);
     }
   }, [authed, transition]);
@@ -56,7 +55,6 @@ export function useHealthCheck(authed: boolean, activeServerUrl: string): Health
     }
   }, [authed, activeServerUrl, transition]);
 
-  // Auth health poll — every 30s
   useEffect(() => {
     if (!authed) return;
     runAuthCheck();
@@ -64,18 +62,16 @@ export function useHealthCheck(authed: boolean, activeServerUrl: string): Health
     return () => clearInterval(id);
   }, [authed, runAuthCheck]);
 
-  // Token validity poll — staggered 10s after mount, then every 60s
   useEffect(() => {
     if (!authed) return;
-    const intervalRef = { id: 0 as ReturnType<typeof setInterval> };
+    const intervalId = { current: 0 as ReturnType<typeof setInterval> };
     const t = setTimeout(() => {
       runTokenCheck();
-      intervalRef.id = setInterval(runTokenCheck, TOKEN_INTERVAL);
+      intervalId.current = setInterval(runTokenCheck, TOKEN_INTERVAL);
     }, 10_000);
-    return () => { clearTimeout(t); clearInterval(intervalRef.id); };
+    return () => { clearTimeout(t); clearInterval(intervalId.current); };
   }, [authed, runTokenCheck]);
 
-  // Active server health poll — every 30s
   useEffect(() => {
     if (!authed || !activeServerUrl) return;
     runServerCheck();
@@ -83,14 +79,12 @@ export function useHealthCheck(authed: boolean, activeServerUrl: string): Health
     return () => clearInterval(id);
   }, [authed, activeServerUrl, runServerCheck]);
 
-  // Instant re-check when browser comes back online
   useEffect(() => {
     if (!authed) return;
     window.addEventListener('online', runAuthCheck);
     return () => window.removeEventListener('online', runAuthCheck);
   }, [authed, runAuthCheck]);
 
-  // Cleanup reconnect flash timer on unmount
   useEffect(() => () => {
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
   }, []);
