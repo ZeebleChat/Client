@@ -1,10 +1,3 @@
-/**
- * Lightweight avatar cache: beam_identity → avatar_attachment_id
- * Persisted in localStorage so it survives page refreshes.
- * Dispatches a custom DOM event on update so UserAvatar components re-render.
- * This avoids fetching avatar URLs on every render and provides instant avatar display.
- */
-
 const KEY = 'zeeble_avatar_cache';
 export const AVATAR_CACHE_EVENT = 'zeeble-avatar-cache-update';
 

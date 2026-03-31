@@ -365,7 +365,7 @@ function CategoryRow({
         </div>
       </div>
       {showPerms && (
-        <CategoryPermPanel categoryId={cat.id} roles={roles} isOwner={isOwner} />
+        <CategoryPermPanel categoryId={Number(cat.id)} roles={roles} isOwner={isOwner} />
       )}
     </div>
   );
@@ -535,7 +535,7 @@ function ChannelRow({ channel, roles, isOwner }: {
   isOwner: boolean;
 }) {
   const [showPerms, setShowPerms] = useState(false);
-  const isVoice = channel.channel_type === 'voice';
+  const isVoice = channel.type === 'voice';
 
   return (
     <div className={styles.roleDefRow}>
@@ -550,7 +550,7 @@ function ChannelRow({ channel, roles, isOwner }: {
         </button>
       </div>
       {showPerms && (
-        <ChannelPermPanel channelId={channel.id} roles={roles} isOwner={isOwner} />
+        <ChannelPermPanel channelId={String(channel.id)} roles={roles} isOwner={isOwner} />
       )}
     </div>
   );

@@ -1,8 +1,3 @@
-/**
- * WebSocket hook for real-time chat functionality.
- * Manages connection, authentication, channel joining, message delivery,
- * and automatic reconnection with exponential backoff.
- */
 import { useEffect, useRef, useCallback } from 'react';
 import { getWsUrl, getServerUrl } from '../config';
 import { getToken, getChatToken, getBeamIdentity } from '../auth';
@@ -30,7 +25,6 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
   const reconnectDelay = useRef(3000);
   const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
   const shouldReconnect = useRef(true);
-  // Incremented on each cleanup so stale closures from prior mounts are ignored
   const connGenRef = useRef(0);
   const onEventRef = useRef(onEvent);
   const channelIdRef = useRef(channelId);
@@ -46,8 +40,7 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
   }, []);
 
   const joinChannel = useCallback((cid: string | number) => {
-    const serverUrl = getServerUrl();
-    const token = getChatToken(serverUrl) || getToken();
+    const token = getChatToken(getServerUrl()) || getToken();
     send({ type: 'join', token, channel_id: String(cid) });
   }, [send]);
 
@@ -57,33 +50,27 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
     const url = getWsUrl();
     if (!url || !/^wss?:\/\//.test(url)) return;
 
-    const gen = connGenRef.current; // capture generation for stale-closure guard
-
+    const gen = connGenRef.current;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      // If cleanup has already run (StrictMode double-invoke), discard this socket
       if (connGenRef.current !== gen) { ws.close(); return; }
+
       const serverUrl = getServerUrl();
       const token = getChatToken(serverUrl) || getToken();
-
       send({ type: 'auth', token });
 
-      // Activate server
-      const stored = serverUrl;
-      if (stored) {
-        const m = stored.match(/\/servers\/([0-9a-f-]{8,})/i);
-        const serverId = m ? m[1] : stored;
+      if (serverUrl) {
+        const m = serverUrl.match(/\/servers\/([0-9a-f-]{8,})/i);
+        const serverId = m ? m[1] : serverUrl;
         send({ type: 'activate', server_id: serverId, token });
       }
 
-      // Join current channel
       if (channelIdRef.current != null) {
         joinChannel(channelIdRef.current);
       }
 
-      // Heartbeat
       heartbeat.current = setInterval(() => send({ type: 'ping' }), WS_HEARTBEAT_INTERVAL_MS);
       reconnectDelay.current = WS_RECONNECT_INITIAL_DELAY_MS;
     };
@@ -96,7 +83,7 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
       reconnectDelay.current = Math.min(delay * 2, WS_RECONNECT_MAX_DELAY_MS);
     };
 
-    ws.onerror = () => { /* ws.onclose will fire */ };
+    ws.onerror = () => { /* onclose fires next */ };
 
     ws.onmessage = (event) => {
       let msg: Record<string, unknown>;
@@ -106,10 +93,7 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
       if (msg.type === 'pong' || msg.type === 'activated') return;
 
       if (msg.kind === 'message' || msg.type === 'message') {
-        onEventRef.current({
-          type: 'message',
-          msg: msg as unknown as ApiMessage,
-        });
+        onEventRef.current({ type: 'message', msg: msg as unknown as ApiMessage });
         return;
       }
 
@@ -134,34 +118,27 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
       }
 
       if (msg.type === 'member' && Array.isArray(msg.members)) {
-        onEventRef.current({
-          type: 'member',
-          groups: msg.members as ApiMemberGroup[],
-        });
-        return;
+        onEventRef.current({ type: 'member', groups: msg.members as ApiMemberGroup[] });
       }
     };
+  // connect uses refs for all dynamic values — deps intentionally omitted
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [send, joinChannel, serverUrl]);
+  }, [serverUrl]);
 
-  // Reconnect & re-join when channelId changes
   useEffect(() => {
     if (channelId != null && wsRef.current?.readyState === WebSocket.OPEN) {
       joinChannel(channelId);
     }
   }, [channelId, joinChannel]);
 
-  // Initial connection
   useEffect(() => {
     shouldReconnect.current = true;
     connect();
     return () => {
-      // Invalidate current generation so any in-flight onopen is ignored
       connGenRef.current += 1;
       shouldReconnect.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (heartbeat.current) clearInterval(heartbeat.current);
-      // Only close if already open — avoids the "closed before established" warning
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) ws.close();
       wsRef.current = null;
@@ -171,7 +148,6 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
   return { send, joinChannel };
 }
 
-// Helper to send a chat message over the WS (used by ChatMain)
 export function buildChatMessagePayload(
   channelId: string | number,
   content: string,
