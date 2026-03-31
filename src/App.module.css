@@ -1,0 +1,16 @@
+/* Outer shell — column so TitleBar sits above the main grid */
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Main three-column layout — fills whatever height is left after the title bar */
+.app {
+  display: grid;
+  grid-template-columns: 80px 260px 1fr 250px;
+  flex: 1;
+  min-height: 0;   /* prevents flex child from overflowing */
+  overflow: hidden;
+}

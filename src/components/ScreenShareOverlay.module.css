@@ -1,0 +1,92 @@
+.overlay {
+  position: fixed;
+  bottom: 80px;
+  right: 16px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-l);
+  box-shadow: var(--neu-out), 0 8px 40px rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.minimized {
+  width: 220px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  flex-shrink: 0;
+}
+
+.liveTag {
+  background: rgba(99, 102, 241, 0.9);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.headerText {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.minimizeBtn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.minimizeBtn:hover { color: var(--text-1); }
+
+.screenList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.screenItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.screenLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  padding: 6px 10px 4px;
+}
+
+.video {
+  width: 100%;
+  display: block;
+  background: #000;
+  max-height: 220px;
+  object-fit: contain;
+}

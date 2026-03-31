@@ -1,0 +1,113 @@
+/* ── Title Bar ──────────────────────────────────────────────────────────────
+   Sits at the very top of the decoration-less Tauri window.
+   Background matches the Rail (--bg-dark) so the whole left column
+   reads as one continuous dark strip.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.bar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  flex-shrink: 0;
+  background: var(--bg-dark);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 9999;
+  padding: 0 10px 0 14px;
+  gap: 10px;
+}
+
+/* ── Brand ──────────────────────────────────────────────────────────────── */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-h, #4f46e5));
+  box-shadow: 0 0 12px var(--accent-glow, rgba(99,102,241,0.35)),
+              var(--neu-out-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.appName {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2, #9ca3af);
+  letter-spacing: 0.2px;
+}
+
+/* ── Drag region ────────────────────────────────────────────────────────── */
+.drag {
+  flex: 1;
+  height: 100%;
+  cursor: default;
+  /* CSS fallback for WebView2 — the JS startDragging() call takes precedence */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* ── Window controls ────────────────────────────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Neumorphic rounded button — same language as .node in Rail */
+.btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-dark, #1b1d21);
+  color: var(--text-3, #6b7280);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--neu-out-sm);
+  transition: box-shadow 0.18s ease,
+              color 0.18s ease,
+              transform 0.15s ease;
+  padding: 0;
+  outline: none;
+  border: var(--border-soft);
+}
+
+.btn:hover {
+  color: var(--text-1, #f3f4f6);
+  box-shadow: var(--neu-in-sm);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: var(--neu-in-sm);
+}
+
+/* Individual accent colours on hover */
+.btnMin:hover  { color: var(--gold,  #f59e0b); }
+.btnMax:hover  { color: var(--green, #10b981); }
+.btnClose:hover {
+  color: var(--red, #ef4444);
+  box-shadow: var(--neu-in-sm),
+              0 0 8px rgba(239, 68, 68, 0.3);
+}

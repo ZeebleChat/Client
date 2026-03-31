@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+:root {
+--bg-main: #212328;
+--bg-panel: #26282e;
+--bg-dark: #1b1d21;
+
+--text-1: #f3f4f6;
+--text-2: #9ca3af;
+--text-3: #6b7280;
+
+--accent: #6366f1;
+--accent-h: #4f46e5;
+--accent-glow: rgba(99, 102, 241, 0.25);
+
+--green: #10b981;
+--red: #ef4444;
+--gold: #f59e0b;
+
+--shadow-dark: rgba(0, 0, 0, 0.35);
+--shadow-light: rgba(255, 255, 255, 0.04);
+
+--neu-out: 5px 5px 10px var(--shadow-dark), -2px -2px 8px var(--shadow-light);
+--neu-out-sm: 3px 3px 6px var(--shadow-dark), -1px -1px 4px var(--shadow-light);
+--neu-in: inset 4px 4px 8px var(--shadow-dark), inset -2px -2px 8px var(--shadow-light);
+--neu-in-sm: inset 2px 2px 4px var(--shadow-dark), inset -1px -1px 3px var(--shadow-light);
+
+--border-soft: 1px solid rgba(255, 255, 255, 0.03);
+
+--radius-l: 16px;
+--radius-m: 12px;
+--radius-s: 8px;
+}
+
+[data-theme="light"] {
+--bg-main: #f3f4f6;
+--bg-panel: #ffffff;
+--bg-dark: #e5e7eb;
+
+--text-1: #1f2937;
+--text-2: #4b5563;
+--text-3: #9ca3af;
+
+--accent: #6366f1;
+--accent-h: #4f46e5;
+--accent-glow: rgba(99, 102, 241, 0.15);
+
+--green: #10b981;
+--red: #ef4444;
+--gold: #f59e0b;
+
+--shadow-dark: rgba(0, 0, 0, 0.1);
+--shadow-light: rgba(255, 255, 255, 0.8);
+
+--neu-out: 5px 5px 10px var(--shadow-dark), -2px -2px 8px var(--shadow-light);
+--neu-out-sm: 3px 3px 6px var(--shadow-dark), -1px -1px 4px var(--shadow-light);
+--neu-in: inset 4px 4px 8px var(--shadow-dark), inset -2px -2px 8px var(--shadow-light);
+--neu-in-sm: inset 2px 2px 4px var(--shadow-dark), inset -1px -1px 3px var(--shadow-light);
+
+--border-soft: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg-main);
+  color: var(--text-1);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button { font-family: inherit; border: none; background: none; cursor: pointer; }
+input  { font-family: inherit; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--bg-dark); border-radius: 4px; }

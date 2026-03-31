@@ -1,0 +1,105 @@
+.checking {
+  flex: 1;
+  min-height: 120px;
+}
+
+/* Centred card that fills the parent panel */
+.gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 40px 32px;
+  text-align: center;
+  flex: 1;
+}
+
+/* Glowing icon circle */
+.iconWrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-h, #4f46e5));
+  box-shadow: 0 0 28px var(--accent-glow, rgba(99,102,241,0.35)),
+              var(--neu-out-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.iconWrap[data-denied] {
+  background: linear-gradient(135deg, var(--red, #ef4444), #b91c1c);
+  box-shadow: 0 0 20px rgba(239,68,68,0.3);
+}
+
+.iconWrap svg {
+  width: 28px;
+  height: 28px;
+}
+
+.title {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1, #f3f4f6);
+}
+
+.body {
+  font-size: 13px;
+  color: var(--text-2, #9ca3af);
+  line-height: 1.6;
+  max-width: 320px;
+}
+
+/* "Only used for calls" trust note */
+.trust {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3, #6b7280);
+  background: var(--bg-dark, #1b1d21);
+  border-radius: var(--radius-s, 8px);
+  padding: 7px 12px;
+  box-shadow: var(--neu-in-sm);
+}
+
+.trust svg {
+  width: 13px;
+  height: 13px;
+  color: var(--green, #10b981);
+  flex-shrink: 0;
+}
+
+/* Primary allow button — matches Zeeble's accent CTA style */
+.allowBtn {
+  margin-top: 4px;
+  padding: 11px 28px;
+  border-radius: var(--radius-s, 8px);
+  background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-h, #4f46e5));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px var(--accent-glow, rgba(99,102,241,0.4));
+  transition: opacity 0.15s, transform 0.12s;
+}
+
+.allowBtn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.allowBtn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.allowBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

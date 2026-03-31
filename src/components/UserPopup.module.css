@@ -1,0 +1,170 @@
+.popup {
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-m);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────────────── */
+
+.banner {
+  height: 72px;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.bannerGradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 50%, #0ea5e9 100%);
+  opacity: 0.7;
+}
+
+/* ── Avatar row ─────────────────────────────────────────────────────────────── */
+
+.avatarRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 12px;
+  margin-top: -28px;
+  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.avatarWrap {
+  position: relative;
+  display: inline-block;
+  /* White/panel ring around avatar */
+  border-radius: 18px;
+  box-shadow: 0 0 0 3px var(--bg-panel);
+}
+
+/* Status dot */
+.statusDot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-panel);
+}
+
+.on     { background: #22c55e; }
+.idle   { background: #f59e0b; }
+.dnd    { background: #ef4444; }
+.offline { background: #64748b; }
+
+/* Premium badge */
+.premiumBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.18);
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 6px;
+  padding: 3px 7px;
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+
+/* ── Info section ───────────────────────────────────────────────────────────── */
+
+.info {
+  padding: 0 14px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.verifiedBadge {
+  font-size: 11px;
+  color: #22c55e;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tag {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.role {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 1px;
+}
+
+/* ── Divider ────────────────────────────────────────────────────────────────── */
+
+.divider {
+  height: 1px;
+  background: var(--border-soft, rgba(255,255,255,0.06));
+  margin: 8px 12px;
+}
+
+/* ── Actions ────────────────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 6px 8px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-s);
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-main);
+  color: var(--text-1);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

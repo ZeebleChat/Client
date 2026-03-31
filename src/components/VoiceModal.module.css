@@ -1,0 +1,272 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  position: relative;
+  background: var(--bg-panel);
+  border-radius: var(--radius-l);
+  padding: 28px 28px 24px;
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: var(--neu-out), 0 0 40px rgba(0, 0, 0, 0.4);
+  border: var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: var(--bg-dark);
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--neu-out-sm);
+  transition: all 0.2s;
+}
+.closeBtn:hover { color: var(--text-1); box-shadow: var(--neu-in-sm); }
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.vcIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.channelName {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* Status */
+.status {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-radius: var(--radius-s);
+  background: var(--bg-main);
+  box-shadow: var(--neu-in-sm);
+}
+.status.connecting { color: var(--gold); }
+.status.connected  { color: var(--green); }
+.status.error      { color: var(--red); }
+.status.idle       { color: var(--text-3); }
+
+/* Mic meter */
+.meterSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meterLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+}
+
+.meterTrack {
+  background: var(--bg-main);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+  box-shadow: var(--neu-in-sm);
+}
+
+.meterBar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 80ms ease;
+  background: var(--green);
+}
+
+.silenceWarning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gold);
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-s);
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Participants */
+.participants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.empty {
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 12px 0;
+}
+
+.participant {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-main);
+  border-radius: var(--radius-s);
+  box-shadow: var(--neu-out-sm);
+  border: 1px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.participant.speaking {
+  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15), var(--neu-out-sm);
+}
+
+.pDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pName {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.pTag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Screen share controls */
+.controls {
+  display: flex;
+  gap: 8px;
+}
+
+.screenShareBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-main);
+  border: 1px solid var(--border-soft);
+  color: var(--text-2);
+  border-radius: var(--radius-s);
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  box-shadow: var(--neu-out-sm);
+  flex: 1;
+  justify-content: center;
+}
+
+.screenShareBtn:hover {
+  color: var(--text-1);
+  box-shadow: var(--neu-in-sm);
+}
+
+.screenShareBtnActive {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: var(--accent);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
+}
+
+.screenShareBtnActive:hover {
+  background: rgba(99, 102, 241, 0.18);
+}
+
+/* Remote screen share video section */
+.screenSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: #000;
+  max-height: 220px;
+}
+
+/* Leave button */
+.leaveBtn {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-s);
+  padding: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.leaveBtn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}

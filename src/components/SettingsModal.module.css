@@ -1,0 +1,176 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 0 72px 340px; /* sits above the footer, left-aligned with sidebar */
+}
+
+.panel {
+  background: var(--bg-panel);
+  border-radius: var(--radius-m);
+  box-shadow: var(--neu-out), 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: var(--border-soft);
+  width: 300px;
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: var(--border-soft);
+}
+
+.panelTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.closeBtn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--bg-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  box-shadow: var(--neu-out-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.closeBtn:hover {
+  color: var(--text-1);
+  box-shadow: var(--neu-in-sm);
+}
+
+.section {
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.04);
+  margin: 0 20px;
+}
+
+/* Account row */
+.accountRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #444, #222);
+  box-shadow: var(--neu-out-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 14px;
+  color: var(--text-1);
+  flex-shrink: 0;
+}
+
+.accountName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.accountSub {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* Form fields */
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.input {
+  width: 100%;
+  background: var(--bg-main);
+  border: var(--border-soft);
+  border-radius: var(--radius-s);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-1);
+  box-shadow: var(--neu-in-sm);
+  transition: border-color 0.2s;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.saveBtn {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-s);
+  padding: 7px 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  margin-top: 4px;
+}
+
+.saveBtn:hover {
+  opacity: 0.85;
+}
+
+.saveBtnDone {
+  background: var(--green);
+}
+
+/* Logout */
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 0;
+  transition: opacity 0.2s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.logoutBtn:hover {
+  opacity: 0.75;
+}

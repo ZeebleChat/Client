@@ -1,0 +1,19 @@
+/* When node has an actual icon image, remove the generic icon padding */
+.nodeWithIcon {
+  padding: 0;
+  overflow: hidden;
+}
+
+.serverIcon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 14px;
+  display: block;
+  transition: border-radius 0.2s;
+}
+
+/* Round icon slightly on hover / active to hint interactivity */
+.nodeWithIcon:hover .serverIcon {
+  border-radius: 10px;
+}
