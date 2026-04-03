@@ -309,6 +309,8 @@ export default function App() {
               onOpenInvites={() => { setServerSettingsInitialTab('invites'); setServerSettingsOpen(true); }}
               onToggleScreenShare={toggleScreenShare}
               isScreenSharing={voiceState.isScreenSharing}
+              voiceStatus={voiceState.status}
+              voiceErrorMsg={voiceState.errorMsg}
               onRefresh={async () => {
                 const [chs, cats] = await Promise.all([fetchChannels(), fetchCategories()]);
                 setChannels(chs);

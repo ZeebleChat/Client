@@ -54,7 +54,7 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
           return;
         }
         try {
-          const res = await fetch(`${server.server_url}/server/info`, { signal: AbortSignal.timeout(4000) });
+          const res = await fetch(`${server.server_url}/v1/server/info`, { signal: AbortSignal.timeout(4000) });
           if (!res.ok) { _iconCache.set(server.server_url, null); updates[server.server_url] = null; return; }
           const info = await res.json();
           if (info.logo_attachment_id) {

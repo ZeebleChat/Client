@@ -35,6 +35,8 @@ interface Props {
   onRefresh?: () => void;
   onToggleScreenShare?: () => void;
   isScreenSharing?: boolean;
+  voiceStatus?: string;
+  voiceErrorMsg?: string;
   isOwner?: boolean;
   isCloudServer?: boolean;
   onLeaveServer?: () => void;
@@ -376,6 +378,7 @@ export default function Sidebar({
   voiceMuted, voiceDeafened, onToggleMute, onToggleDeafen,
   onOpenServerSettings, onOpenInvites, onRefresh,
   onToggleScreenShare, isScreenSharing,
+  voiceStatus, voiceErrorMsg,
   isOwner, isCloudServer, onLeaveServer, onDeleteServer,
 }: Props) {
   const identity = getBeamIdentity();
@@ -824,6 +827,11 @@ export default function Sidebar({
             </svg>
             <span className={styles.voiceBarChannel}>#{activeVoiceChannelName ?? 'voice'}</span>
           </div>
+          {voiceStatus === 'error' && voiceErrorMsg && (
+            <div style={{ fontSize: 11, color: 'var(--red, #f04747)', padding: '2px 4px 4px', wordBreak: 'break-word' }}>
+              {voiceErrorMsg}
+            </div>
+          )}
           <div className={styles.voiceBarControls}>
           {onToggleMute && (
             <button

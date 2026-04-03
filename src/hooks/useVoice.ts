@@ -201,7 +201,7 @@ export function useVoice() {
     let livekitUrl: string;
     try {
       const fetchToken = () => fetch(
-        `${serverUrl}/voice/token?channel_id=${encodeURIComponent(String(channel.id))}`,
+        `${serverUrl}/v1/voice/token?channel_id=${encodeURIComponent(String(channel.id))}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       let res = await fetchToken();
