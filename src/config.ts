@@ -18,7 +18,7 @@ export const getServerUrl = (): string =>
 
 export const getWsUrl = (): string => {
   const base = getServerUrl().replace(/^http/, 'ws');
-  return `${base}/ws`;
+  return `${base}/v1/ws`;
 };
 
 export const isZcloudUrl = (url: string): boolean =>

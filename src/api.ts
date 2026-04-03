@@ -162,7 +162,7 @@ export async function redeemPromoReq(
 async function resolveAudience(connectionUrl: string): Promise<string> {
   if (isZcloudUrl(connectionUrl)) return connectionUrl;
   try {
-    const res = await fetch(`${connectionUrl}/server/info`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${connectionUrl}/v1/server/info`, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const info = await res.json();
       if (info?.public_url) return info.public_url.replace(/\/$/, '');
@@ -233,12 +233,12 @@ export interface ServerInfo {
 
 export function getServerAttachmentUrl(serverUrl: string, attachmentId: number | string): string {
   const token = getChatToken(serverUrl) ?? getToken();
-  return `${serverUrl}/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+  return `${serverUrl}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
 }
 
 export async function fetchServerInfo(serverUrl: string): Promise<ServerInfo | null> {
   try {
-    const res = await fetch(`${serverUrl}/server/info`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${serverUrl}/v1/server/info`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     return res.json();
   } catch { return null; }
@@ -257,7 +257,7 @@ export interface ApiChannel {
 
 export async function fetchChannels(): Promise<ApiChannel[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/channels`);
+    const res = await authedFetch(`${getServerUrl()}/v1/channels`);
     if (!res.ok) return [];
     return unwrapArray<ApiChannel>(await res.json(), 'channels');
   } catch { return []; }
@@ -273,7 +273,7 @@ export interface ApiCategory {
 
 export async function fetchCategories(): Promise<ApiCategory[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/categories`);
+    const res = await authedFetch(`${getServerUrl()}/v1/categories`);
     if (!res.ok) return [];
     const data = await res.json();
     return unwrapArray<ApiCategory>(data, 'categories');
@@ -302,7 +302,7 @@ export interface ApiMessage {
 export async function fetchMessages(channelId: string | number): Promise<ApiMessage[]> {
   try {
     const res = await authedFetch(
-      `${getServerUrl()}/channels/${encodeURIComponent(String(channelId))}/messages`
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/messages`
     );
     if (!res.ok) return [];
     return unwrapArray<ApiMessage>(await res.json(), 'messages');
@@ -326,7 +326,7 @@ export interface ApiMemberGroup {
 
 export async function fetchMembers(): Promise<ApiMemberGroup[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/members`);
+    const res = await authedFetch(`${getServerUrl()}/v1/members`);
     if (!res.ok) return [];
     const raw = unwrapArray<unknown>(await res.json(), 'members');
     return normalizeFlatMembers(raw);
@@ -381,7 +381,7 @@ export interface ServerInvite {
 
 export async function listInvites(serverUrl: string): Promise<{ invites: ServerInvite[]; forbidden: boolean }> {
   try {
-    const res = await authedFetch(`${serverUrl}/invites`);
+    const res = await authedFetch(`${serverUrl}/v1/invites`);
     if (res.status === 403) return { invites: [], forbidden: true };
     const data = await safeJson(res);
     const invites: ServerInvite[] = Array.isArray(data) ? data as ServerInvite[] : (data.invites as ServerInvite[] ?? []);
@@ -391,7 +391,7 @@ export async function listInvites(serverUrl: string): Promise<{ invites: ServerI
 
 export async function createServerInvite(serverUrl: string, opts?: { max_uses?: number; expires_in_secs?: number }): Promise<{ ok: boolean; code?: string; url?: string; error?: string }> {
   try {
-    const res = await authedFetch(`${serverUrl}/invites`, {
+    const res = await authedFetch(`${serverUrl}/v1/invites`, {
       method: 'POST',
       body: JSON.stringify(opts ?? {}),
     });
@@ -404,14 +404,14 @@ export async function createServerInvite(serverUrl: string, opts?: { max_uses?: 
 
 export async function deleteServerInvite(serverUrl: string, code: string): Promise<boolean> {
   try {
-    const res = await authedFetch(`${serverUrl}/invites/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    const res = await authedFetch(`${serverUrl}/v1/invites/${encodeURIComponent(code)}`, { method: 'DELETE' });
     return res.ok || res.status === 204;
   } catch { return false; }
 }
 
 export async function validateInvite(serverUrl: string, code: string): Promise<{ ok: boolean; data?: Record<string, unknown> }> {
   try {
-    const res = await fetch(`${serverUrl}/invites/${encodeURIComponent(code)}`, {
+    const res = await fetch(`${serverUrl}/v1/invites/${encodeURIComponent(code)}`, {
       signal: AbortSignal.timeout(5000),
     });
     const data = await safeJson(res);
@@ -421,7 +421,7 @@ export async function validateInvite(serverUrl: string, code: string): Promise<{
 
 export async function redeemInvite(serverUrl: string, code: string, chatToken: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${serverUrl}/invites/${encodeURIComponent(code)}/redeem`, {
+    const res = await fetch(`${serverUrl}/v1/invites/${encodeURIComponent(code)}/redeem`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${chatToken}` },
       signal: AbortSignal.timeout(5000),
@@ -470,7 +470,7 @@ export async function deleteCloudServer(serverUrl: string): Promise<{ ok: boolea
 
 export async function patchServerSettings(settings: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/server/settings`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/server/settings`, {
       method: 'PATCH',
       body: JSON.stringify(settings),
     });
@@ -483,7 +483,7 @@ export async function patchServerSettings(settings: Record<string, unknown>): Pr
 
 export async function createCategory(name: string, position = 0): Promise<{ ok: boolean; data?: ApiCategory; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/categories`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/categories`, {
       method: 'POST',
       body: JSON.stringify({ name, position }),
     });
@@ -494,7 +494,7 @@ export async function createCategory(name: string, position = 0): Promise<{ ok: 
 
 export async function updateCategory(id: string | number, patch: { name?: string; position?: number }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/categories/${encodeURIComponent(String(id))}`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/categories/${encodeURIComponent(String(id))}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
@@ -505,7 +505,7 @@ export async function updateCategory(id: string | number, patch: { name?: string
 
 export async function deleteCategory(id: string | number): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/categories/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+    const res = await authedFetch(`${getServerUrl()}/v1/categories/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
     const data = await safeJson(res);
     return res.ok ? { ok: true } : { ok: false, error: data.error as string };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
@@ -516,7 +516,7 @@ export async function deleteCategory(id: string | number): Promise<{ ok: boolean
 export function getAttachmentUrl(attachmentId: string | number): string {
   const base = getServerUrl();
   const token = getChatToken(base) ?? getToken();
-  return `${base}/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+  return `${base}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
 }
 
 export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string | number; error?: string }> {
@@ -526,7 +526,7 @@ export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string
     const base = getServerUrl();
     const token = getChatToken(base) ?? getToken() ?? '';
     // Bare fetch to avoid extra headers that may interfere with multipart parsing
-    const res = await fetch(`${base}/upload`, {
+    const res = await fetch(`${base}/v1/upload`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: form,
@@ -552,7 +552,7 @@ export async function createChannel(
 ): Promise<{ ok: boolean; data?: ApiChannel; error?: string }> {
   try {
     const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    const res = await authedFetch(`${getServerUrl()}/channels`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/channels`, {
       method: 'POST',
       body: JSON.stringify({ id, name, type, category_id: categoryId, position, topic: '' }),
     });
@@ -563,7 +563,7 @@ export async function createChannel(
 
 export async function renameChannel(channelId: string | number, name: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/channels/${encodeURIComponent(String(channelId))}`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}`, {
       method: 'PATCH',
       body: JSON.stringify({ name }),
     });
@@ -576,7 +576,7 @@ export async function updateChannelPosition(channelId: string | number, position
   try {
     const body: Record<string, unknown> = { position };
     if (categoryId !== undefined) body.category_id = categoryId;
-    const res = await authedFetch(`${getServerUrl()}/channels/${encodeURIComponent(String(channelId))}`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
@@ -586,7 +586,7 @@ export async function updateChannelPosition(channelId: string | number, position
 
 export async function deleteChannel(channelId: string | number): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/channels/${encodeURIComponent(String(channelId))}`, { method: 'DELETE' });
+    const res = await authedFetch(`${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}`, { method: 'DELETE' });
     const data = await safeJson(res);
     return res.ok ? { ok: true } : { ok: false, error: data.error as string };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
@@ -596,7 +596,7 @@ export async function deleteChannel(channelId: string | number): Promise<{ ok: b
 
 export async function setMemberRole(userId: string, role: string | null): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/roles/${encodeURIComponent(userId)}`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/roles/${encodeURIComponent(userId)}`, {
       method: 'PUT',
       body: JSON.stringify({ role }),
     });
@@ -627,7 +627,7 @@ export function getRoleColor(role: string | null | undefined): string {
 
 export async function fetchCustomRoles(): Promise<ApiCustomRole[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/custom_roles`);
+    const res = await authedFetch(`${getServerUrl()}/v1/custom_roles`);
     if (!res.ok) return [];
     const data = await res.json().catch(() => []);
     _roleColorCache.clear();
@@ -638,7 +638,7 @@ export async function fetchCustomRoles(): Promise<ApiCustomRole[]> {
 
 export async function createCustomRole(name: string, color: string, hoist?: boolean, permissions?: Record<string, boolean>): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/custom_roles`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/custom_roles`, {
       method: 'POST',
       body: JSON.stringify({ name, color, hoist: hoist ?? false, permissions: permissions ?? {} }),
     });
@@ -649,7 +649,7 @@ export async function createCustomRole(name: string, color: string, hoist?: bool
 
 export async function updateCustomRole(oldName: string, updates: { name?: string; color?: string; hoist?: boolean; permissions?: Record<string, boolean> }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/custom_roles/${encodeURIComponent(oldName)}`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/custom_roles/${encodeURIComponent(oldName)}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
@@ -660,7 +660,7 @@ export async function updateCustomRole(oldName: string, updates: { name?: string
 
 export async function reorderCustomRoles(order: string[]): Promise<{ ok: boolean }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/custom_roles`, {
+    const res = await authedFetch(`${getServerUrl()}/v1/custom_roles`, {
       method: 'PATCH',
       body: JSON.stringify({ order }),
     });
@@ -670,7 +670,7 @@ export async function reorderCustomRoles(order: string[]): Promise<{ ok: boolean
 
 export async function deleteCustomRole(name: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/custom_roles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const res = await authedFetch(`${getServerUrl()}/v1/custom_roles/${encodeURIComponent(name)}`, { method: 'DELETE' });
     const data = await safeJson(res);
     return res.ok ? { ok: true } : { ok: false, error: data.error as string };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
@@ -692,7 +692,7 @@ export interface CategoryPerm {
 
 export async function fetchChannelPermissions(channelId: string): Promise<ChannelPerm[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/channels/${encodeURIComponent(channelId)}/permissions`);
+    const res = await authedFetch(`${getServerUrl()}/v1/channels/${encodeURIComponent(channelId)}/permissions`);
     if (!res.ok) return [];
     return res.json().catch(() => []);
   } catch { return []; }
@@ -705,7 +705,7 @@ export async function setChannelPermission(
 ): Promise<{ ok: boolean }> {
   try {
     const res = await authedFetch(
-      `${getServerUrl()}/channels/${encodeURIComponent(channelId)}/permissions/${encodeURIComponent(roleName)}`,
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(channelId)}/permissions/${encodeURIComponent(roleName)}`,
       { method: 'PUT', body: JSON.stringify(perms) },
     );
     return { ok: res.ok };
@@ -715,7 +715,7 @@ export async function setChannelPermission(
 export async function deleteChannelPermission(channelId: string, roleName: string): Promise<{ ok: boolean }> {
   try {
     const res = await authedFetch(
-      `${getServerUrl()}/channels/${encodeURIComponent(channelId)}/permissions/${encodeURIComponent(roleName)}`,
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(channelId)}/permissions/${encodeURIComponent(roleName)}`,
       { method: 'DELETE' },
     );
     return { ok: res.ok };
@@ -724,7 +724,7 @@ export async function deleteChannelPermission(channelId: string, roleName: strin
 
 export async function fetchCategoryPermissions(categoryId: number): Promise<CategoryPerm[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/categories/${categoryId}/permissions`);
+    const res = await authedFetch(`${getServerUrl()}/v1/categories/${categoryId}/permissions`);
     if (!res.ok) return [];
     return res.json().catch(() => []);
   } catch { return []; }
@@ -737,7 +737,7 @@ export async function setCategoryPermission(
 ): Promise<{ ok: boolean }> {
   try {
     const res = await authedFetch(
-      `${getServerUrl()}/categories/${categoryId}/permissions/${encodeURIComponent(roleName)}`,
+      `${getServerUrl()}/v1/categories/${categoryId}/permissions/${encodeURIComponent(roleName)}`,
       { method: 'PUT', body: JSON.stringify(perms) },
     );
     return { ok: res.ok };
@@ -747,7 +747,7 @@ export async function setCategoryPermission(
 export async function deleteCategoryPermission(categoryId: number, roleName: string): Promise<{ ok: boolean }> {
   try {
     const res = await authedFetch(
-      `${getServerUrl()}/categories/${categoryId}/permissions/${encodeURIComponent(roleName)}`,
+      `${getServerUrl()}/v1/categories/${categoryId}/permissions/${encodeURIComponent(roleName)}`,
       { method: 'DELETE' },
     );
     return { ok: res.ok };
