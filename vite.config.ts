@@ -47,5 +47,7 @@ export default defineConfig({
     // Don't minify in debug builds so DevTools source maps work
     minify: !process.env.TAURI_ENV_DEBUG ? 'oxc' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Chunks load from disk in Tauri — size has no impact on performance
+    chunkSizeWarningLimit: 2000,
   },
 })

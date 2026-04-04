@@ -217,7 +217,8 @@ pub fn run() {
             stop_screen_capture,
         ])
         .setup(|app| {
-            tauri::WebviewWindowBuilder::new(
+            #[allow(unused_mut)]
+            let mut builder = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
@@ -225,8 +226,16 @@ pub fn run() {
             .title("Zeeble")
             .inner_size(1280.0, 800.0)
             .min_inner_size(900.0, 600.0)
-            .decorations(false)
-            .build()?;
+            .decorations(false);
+
+            // Disable WebView2 tracking prevention so localStorage is accessible
+            // across all origins (needed for chat server tokens stored by IP/domain).
+            #[cfg(target_os = "windows")]
+            {
+                builder = builder.additional_browser_args("--disable-features=msTrackingPrevention");
+            }
+
+            builder.build()?;
 
             Ok(())
         })
