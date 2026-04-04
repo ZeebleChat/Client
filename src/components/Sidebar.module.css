@@ -494,6 +494,86 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Channel context menu ────────────────────────────────────────────────────── */
+
+.ctxMenu {
+  position: fixed;
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-s);
+  box-shadow: var(--neu-out), 0 16px 40px rgba(0, 0, 0, 0.55);
+  padding: 4px;
+  min-width: 190px;
+  z-index: 1000;
+  animation: ctxPop 0.12s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  transform-origin: top left;
+  user-select: none;
+}
+
+@keyframes ctxPop {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.ctxHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.ctxDivider {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 3px 6px;
+}
+
+.ctxItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.ctxItem:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--text-1);
+}
+
+.ctxItem svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ctxItem:hover svg {
+  opacity: 1;
+}
+
+.ctxItemDanger {
+  color: var(--red);
+}
+
+.ctxItemDanger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--red);
+}
+
 /* ── Footer QR popup ─────────────────────────────────────────────────────────── */
 
 .qrPopup {

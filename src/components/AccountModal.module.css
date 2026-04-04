@@ -908,6 +908,75 @@
 .perkLabel {
   font-size: 13px;
   color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.perkTooltipWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.perkInfoIcon {
+  color: var(--accent);
+  opacity: 0.45;
+  cursor: default;
+  display: block;
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.perkTooltipWrap:hover .perkInfoIcon {
+  opacity: 1;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
+.perkTooltip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  background: var(--bg-2, #1a1a2e);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.55;
+  width: 240px;
+  white-space: normal;
+  z-index: 200;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(99,102,241,0.08);
+}
+
+/* caret arrow */
+.perkTooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--bg-2, #1a1a2e);
+}
+
+.perkTooltip::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: rgba(99, 102, 241, 0.25);
+  margin-top: 1px;
+}
+
+.perkTooltipWrap:hover .perkTooltip {
+  display: block;
 }
 
 .perkColFree {

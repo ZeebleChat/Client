@@ -7,6 +7,7 @@
  * - User identity footer with QR code for adding friends
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import type { SidebarCategory } from '../types';
 import type { ApiChannel } from '../api';
@@ -280,6 +281,88 @@ function ChannelSettingsPopover({
   );
 }
 
+// ── Channel context menu ───────────────────────────────────────────────────────
+
+type CtxMenuState = { x: number; y: number; ch: ApiChannel };
+
+function ChannelContextMenu({
+  x, y, ch,
+  onRename,
+  onDelete,
+  onClose,
+}: CtxMenuState & { onRename: () => void; onDelete: () => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Clamp position so menu never overflows the viewport
+  const [pos, setPos] = useState({ x, y });
+  useEffect(() => {
+    if (!ref.current) return;
+    const { offsetWidth: w, offsetHeight: h } = ref.current;
+    setPos({
+      x: Math.min(x, window.innerWidth  - w - 8),
+      y: Math.min(y, window.innerHeight - h - 8),
+    });
+  }, [x, y]);
+
+  // Close on outside click or Escape
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  function copyId() {
+    navigator.clipboard.writeText(String(ch.id));
+    onClose();
+  }
+
+  return createPortal(
+    <div ref={ref} className={styles.ctxMenu} style={{ left: pos.x, top: pos.y }}>
+      {/* Channel name header */}
+      <div className={styles.ctxHeader}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="18" y2="18"/>
+        </svg>
+        {ch.name}
+      </div>
+      <div className={styles.ctxDivider} />
+
+      <button className={styles.ctxItem} onClick={() => { onRename(); onClose(); }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Rename Channel
+      </button>
+
+      <button className={styles.ctxItem} onClick={copyId}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        Copy Channel ID
+      </button>
+
+      <div className={styles.ctxDivider} />
+
+      <button className={`${styles.ctxItem} ${styles.ctxItemDanger}`} onClick={() => { onDelete(); onClose(); }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+        </svg>
+        Delete Channel
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Drag-and-drop types ────────────────────────────────────────────────────────
 
 type DragItem =
@@ -422,6 +505,7 @@ export default function Sidebar({
   // ── Settings popovers ───────────────────────────────────────────────────
   const [catSettings, setCatSettings] = useState<string | number | null>(null);
   const [chSettings,  setChSettings]  = useState<string | number | null>(null);
+  const [ctxMenu,     setCtxMenu]     = useState<CtxMenuState | null>(null);
 
   // ── Drag state ──────────────────────────────────────────────────────────
   const dragItem = useRef<DragItem | null>(null);
@@ -719,6 +803,7 @@ export default function Sidebar({
                         className={`${styles.chItem} ${isActive ? styles.active : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
                         onClick={() => onSelectChannel(ch)}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChannel(ch); } }}
+                        onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
                         onDragStart={e => onChDragStart(e, ch.id, cat.id, 'text')}
                         onDragOver={e => onChDragOver(e, ch.id)}
                         onDrop={e => onChDrop(e, ch.id, cat.id, 'text')}
@@ -756,6 +841,7 @@ export default function Sidebar({
                       draggable
                       className={`${styles.voiceCard} ${isActiveVoice ? styles.vcActive : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
                       onClick={() => onJoinVoice(ch)}
+                      onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
                       onDragStart={e => onChDragStart(e, ch.id, cat.id, 'voice')}
                       onDragOver={e => onChDragOver(e, ch.id)}
                       onDrop={e => onChDrop(e, ch.id, cat.id, 'voice')}
@@ -954,6 +1040,19 @@ export default function Sidebar({
             </div>
           </div>
         </div>
+      )}
+
+      {ctxMenu && (
+        <ChannelContextMenu
+          {...ctxMenu}
+          onRename={() => { setChSettings(ctxMenu.ch.id); setCatSettings(null); }}
+          onDelete={async () => {
+            if (!confirm(`Delete channel "${ctxMenu.ch.name}"? This cannot be undone.`)) return;
+            await deleteChannel(ctxMenu.ch.id);
+            onRefresh?.();
+          }}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </aside>
   );

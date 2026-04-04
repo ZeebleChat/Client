@@ -1264,15 +1264,19 @@ function SubaccountsTab() {
 // ── Premium tab ────────────────────────────────────────────────────────────────
 
 // freeVal / premiumVal: a string value, 'check', 'included', or null (= X mark)
-const PREMIUM_PERKS: { label: string; freeVal: string | 'check' | 'included' | null; premiumVal: string | 'check' | 'included' | null }[] = [
-  { label: 'Self-hosted servers (join)',        freeVal: '10',       premiumVal: '200'      },
-  { label: 'Zeeble cloud servers (create)',     freeVal: '10',       premiumVal: '30'       },
-  { label: 'Sub-accounts',                      freeVal: '10',       premiumVal: '20'       },
-  { label: 'Voice quality',                     freeVal: 'Standard', premiumVal: 'priority' },
-  { label: 'Message search',                    freeVal: 'included', premiumVal: 'included' },
-  { label: 'Custom beam tag',                   freeVal: null,       premiumVal: 'check'    },
-  { label: 'Profile banner & animated avatar',  freeVal: null,       premiumVal: 'check'    },
-  { label: 'Monthly boosts',                    freeVal: null,       premiumVal: 'included' },
+const PREMIUM_PERKS: { label: string; freeVal: string | 'check' | 'included' | null; premiumVal: string | 'check' | 'included' | null; tooltip?: string }[] = [
+  { label: 'Join server',                        freeVal: '10',       premiumVal: '200'      },
+  { label: 'Zeeble cloud servers (create)',      freeVal: '10',       premiumVal: '30'       },
+  { label: 'Sub-accounts',                       freeVal: '10',       premiumVal: '20'       },
+  { label: 'Message search',                     freeVal: 'included', premiumVal: 'included' },
+  { label: 'Custom beam tag',                    freeVal: null,       premiumVal: 'check'    },
+  { label: 'Profile banner & animated avatar',   freeVal: null,       premiumVal: 'check'    },
+  {
+    label:      'Monthly boosts',
+    freeVal:    null,
+    premiumVal: '5',
+    tooltip:    'Boosts unlock extra emoji & sticker slots and make them globally available across Zeeble. On cloud servers, they also expand the server\'s total limits. On self-hosted servers, they make your emojis & stickers global.',
+  },
 ];
 
 // ── PremiumTab ────────────────────────────────────────────────────────────────
@@ -1445,7 +1449,20 @@ function PremiumTab() {
       </div>
       {PREMIUM_PERKS.map(p => (
         <div key={p.label} className={styles.perkRow}>
-          <span className={styles.perkLabel}>{p.label}</span>
+          <span className={styles.perkLabel}>
+            {p.label}
+            {p.tooltip && (
+              <span className={styles.perkTooltipWrap}>
+                <svg className={styles.perkInfoIcon} width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="10" opacity="0.15"/>
+                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.8"/>
+                  <line x1="12" y1="11" x2="12" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  <circle cx="12" cy="7.5" r="1.1"/>
+                </svg>
+                <span className={styles.perkTooltip}>{p.tooltip}</span>
+              </span>
+            )}
+          </span>
           <span className={styles.perkColFree}><PerkCell val={p.freeVal} isPremiumCol={false} /></span>
           <span className={styles.perkColPremium}><PerkCell val={p.premiumVal} isPremiumCol={true} /></span>
         </div>

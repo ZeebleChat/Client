@@ -989,6 +989,32 @@ export async function verifyEmailPinReq(token: string, pin: string): Promise<{ o
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
+export async function sendPasswordResetPinReq(email: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/account/password/reset-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) return { ok: false, error: data.error as string };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
+export async function resetPasswordWithPinReq(email: string, pin: string, new_password: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/account/password/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, pin, new_password }),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) return { ok: false, error: data.error as string };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
 export async function updatePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`${getAuthUrl()}/account/password`, {
