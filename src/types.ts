@@ -5,6 +5,8 @@ export interface SidebarCategory {
   name: string;
   textChannels: import('./api').ApiChannel[];
   voiceChannels: import('./api').ApiChannel[];
+  arenaChannels: import('./api').ApiChannel[];
+  boardChannels: import('./api').ApiChannel[];
 }
 
 export type StatusDotClass = 'on' | 'idle' | 'dnd' | 'offline';

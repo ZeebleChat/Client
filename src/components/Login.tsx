@@ -333,11 +333,11 @@ export default function Login({ onLogin }: Props) {
         <form className={styles.form} onSubmit={handleSubmit}>
           {isRegister && (
             <div className={styles.field}>
-              <label className={styles.label}>Display Name <span style={{ opacity: 0.5 }}>(optional)</span></label>
+              <label className={styles.label}>Username <span style={{ opacity: 0.5 }}>(optional)</span></label>
               <input
                 className={styles.input}
                 type="text"
-                placeholder="Your name"
+                placeholder="username"
                 value={displayName}
                 onChange={e => setDisplayName(e.target.value)}
                 maxLength={12}

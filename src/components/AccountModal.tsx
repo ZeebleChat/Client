@@ -120,6 +120,8 @@ function ProfileTab() {
     setSaving(false);
     if (result.ok) {
       setSaveStatus({ ok: true, msg: 'Display name saved!' });
+      localStorage.setItem('cached_display_name', displayName.trim());
+      window.dispatchEvent(new CustomEvent('zeeble:display-name-changed'));
     } else {
       setSaveStatus({ ok: false, msg: result.error || 'Failed to save.' });
     }
@@ -720,6 +722,21 @@ function SecurityTab() {
         </button>
       </div>
 
+      {/* ── QR Code Login ────────────────────────────────────────────────────── */}
+      <div className={styles.sectionTitle} style={{ marginTop: 28 }}>QR Code Login</div>
+
+      <div className={styles.passkeyCard}>
+        <div className={styles.twoFaStatus}>
+          <span className={styles.comingSoonBadge}>Coming Soon</span>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '8px 0 12px' }}>
+          Scan a QR code with your mobile device to instantly log in on this device — no password needed.
+        </p>
+        <button className={styles.saveBtn} disabled>
+          Show QR Code
+        </button>
+      </div>
+
     </div>
   );
 }
@@ -984,8 +1001,8 @@ function ServersTab({ onSwitchServer }: { onSwitchServer?: (url: string, name: s
 
 // ── Sub-accounts tab ───────────────────────────────────────────────────────────
 
-const SA_TYPE_LABELS: Record<string, string> = { alt: 'Alt', child: 'Child', bot: 'Bot' };
-const SA_TYPE_COLORS: Record<string, string> = { Child: 'var(--accent)', Alt: 'var(--green)', Bot: 'var(--gold)' };
+const SA_TYPE_LABELS: Record<string, string> = { alt: 'Alt', child: 'Child', bot: 'Bot', streamer: 'Streamer' };
+const SA_TYPE_COLORS: Record<string, string> = { Child: 'var(--accent)', Alt: 'var(--green)', Bot: 'var(--gold)', Streamer: 'var(--purple)' };
 
 type SaEntry = ApiSubAccount & { typeLabel: string };
 
@@ -1181,7 +1198,7 @@ function SubAccountRow({ acc, onRefresh }: { acc: SaEntry; onRefresh: () => void
 
 function SubaccountsTab() {
   const [subAccounts, setSubAccounts] = useState<SaEntry[]>([]);
-  const [type, setType] = useState<'alt' | 'child' | 'bot'>('alt');
+  const [type, setType] = useState<'alt' | 'child' | 'bot' | 'streamer'>('alt');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [creating, setCreating] = useState(false);
@@ -1195,6 +1212,7 @@ function SubaccountsTab() {
       ...(info.children ?? []).map(a => ({ ...a, typeLabel: 'Child' })),
       ...(info.alts ?? []).map(a => ({ ...a, typeLabel: 'Alt' })),
       ...(info.bots ?? []).map(a => ({ ...a, typeLabel: 'Bot' })),
+      ...(info.streamers ?? []).map(a => ({ ...a, typeLabel: 'Streamer' })),
     ]);
   }, []);
 
@@ -1220,7 +1238,7 @@ function SubaccountsTab() {
       <div className={styles.sectionTitle}>Create Subaccount</div>
 
       <div className={styles.saTypeGroup} style={{ marginBottom: 8 }}>
-        {(['alt', 'child', 'bot'] as const).map(t => (
+        {(['alt', 'child', 'bot', 'streamer'] as const).map(t => (
           <button key={t}
             className={`${styles.saTypePill} ${type === t ? styles.saTypePillActive : ''}`}
             onClick={() => { setType(t); setPassword(''); }}
@@ -1604,33 +1622,26 @@ function AppearanceTab() {
   const [accent, setAccent] = useState(localStorage.getItem('zeeble_accent') ?? '#6366f1');
   const [fontSize, setFontSize] = useState(localStorage.getItem('zeeble_font_size') ?? 'normal');
   const [density, setDensity] = useState(localStorage.getItem('zeeble_density') ?? 'cozy');
-  const [saved, setSaved] = useState(false);
 
   function handleAccent(color: { value: string; hover: string }) {
     setAccent(color.value);
     applyAppearance(color.value, color.hover, fontSize, density);
+    localStorage.setItem('zeeble_accent', color.value);
+    localStorage.setItem('zeeble_accent_h', color.hover);
   }
 
   function handleFontSize(s: string) {
     setFontSize(s);
     const col = ACCENT_COLORS.find(c => c.value === accent) ?? ACCENT_COLORS[0];
     applyAppearance(accent, col.hover, s, density);
+    localStorage.setItem('zeeble_font_size', s);
   }
 
   function handleDensity(d: string) {
     setDensity(d);
     const col = ACCENT_COLORS.find(c => c.value === accent) ?? ACCENT_COLORS[0];
     applyAppearance(accent, col.hover, fontSize, d);
-  }
-
-  function handleSave() {
-    const col = ACCENT_COLORS.find(c => c.value === accent) ?? ACCENT_COLORS[0];
-    localStorage.setItem('zeeble_accent', accent);
-    localStorage.setItem('zeeble_accent_h', col.hover);
-    localStorage.setItem('zeeble_font_size', fontSize);
-    localStorage.setItem('zeeble_density', density);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    localStorage.setItem('zeeble_density', d);
   }
 
 return (
@@ -1712,9 +1723,6 @@ return (
         </div>
       </div>
 
-      <button className={`${styles.saveBtn} ${saved ? styles.saveBtnDone : ''}`} onClick={handleSave}>
-        {saved ? 'Saved!' : 'Save Appearance'}
-      </button>
     </div>
   );
 }

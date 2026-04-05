@@ -40,6 +40,7 @@ import ScreenPickerModal from './components/ScreenPickerModal';
 import TitleBar from './components/TitleBar';
 import { useVoice } from './hooks/useVoice';
 import { useHealthCheck } from './hooks/useHealthCheck';
+import { useVoiceRooms } from './hooks/useVoiceRooms';
 import StatusBanner from './components/StatusBanner';
 
 export default function App() {
@@ -62,6 +63,7 @@ export default function App() {
   const [memberGroups, setMemberGroups] = useState<ApiMemberGroup[]>([]);
 
   const { voiceState, joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreenShare, startScreenCapture } = useVoice();
+  const voiceRoomParticipants = useVoiceRooms(!!activeServerUrl && authed);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -109,6 +111,15 @@ export default function App() {
     if (event.type === 'member') {
       setMemberGroups(event.groups);
     }
+    if (event.type === 'channel_created') {
+      setChannels(prev => prev.some(c => String(c.id) === String(event.channel.id)) ? prev : [...prev, event.channel]);
+    }
+    if (event.type === 'channel_deleted') {
+      setChannels(prev => prev.filter(c => String(c.id) !== String(event.channel_id)));
+    }
+    if (event.type === 'channel_renamed') {
+      setChannels(prev => prev.map(c => String(c.id) === String(event.channel.id) ? { ...c, ...event.channel } : c));
+    }
   }, []);
 
   const { send } = useWebSocket({
@@ -130,6 +141,9 @@ export default function App() {
       const identity = getBeamIdentity();
       if (info && identity) {
         setAvatarCache(identity, info.avatar_attachment_id);
+        if (info.display_name) {
+          localStorage.setItem('cached_display_name', info.display_name);
+        }
       }
     });
   }, [authed]);
@@ -228,6 +242,12 @@ export default function App() {
       voiceChannels: channels
         .filter(ch => String(ch.category_id) === String(cat.id) && ch.type === 'voice')
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+      arenaChannels: channels
+        .filter(ch => String(ch.category_id) === String(cat.id) && ch.type === 'arena')
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+      boardChannels: channels
+        .filter(ch => String(ch.category_id) === String(cat.id) && ch.type === 'board')
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     }));
 
     const catIds = new Set(apiCategories.map(c => String(c.id)));
@@ -237,12 +257,20 @@ export default function App() {
     const uncatVoice = channels.filter(
       ch => ch.type === 'voice' && !catIds.has(String(ch.category_id))
     );
-    if (uncatText.length || uncatVoice.length) {
+    const uncatArena = channels.filter(
+      ch => ch.type === 'arena' && !catIds.has(String(ch.category_id))
+    );
+    const uncatBoard = channels.filter(
+      ch => ch.type === 'board' && !catIds.has(String(ch.category_id))
+    );
+    if (uncatText.length || uncatVoice.length || uncatArena.length || uncatBoard.length) {
       result.unshift({
         id: '__uncategorized__',
         name: 'Channels',
         textChannels: uncatText,
         voiceChannels: uncatVoice,
+        arenaChannels: uncatArena,
+        boardChannels: uncatBoard,
       });
     }
 
@@ -298,6 +326,7 @@ export default function App() {
               activeVoiceChannelId={voiceState.channel?.id ?? null}
               activeVoiceChannelName={voiceState.channel?.name ?? null}
               voiceParticipants={voiceState.participants}
+              voiceRoomParticipants={voiceRoomParticipants}
               onSelectChannel={selectChannel}
               onJoinVoice={handleJoinVoice}
               onLeaveVoice={handleLeaveVoice}
@@ -319,12 +348,15 @@ export default function App() {
               isCloudServer={isZcloudUrl(activeServerUrl)}
               isOwner={memberGroups.flatMap(g => g.users ?? []).find(u => u.name === getBeamIdentity())?.is_owner ?? false}
               onLeaveServer={async () => {
-                await leaveCloudServer(activeServerUrl);
-                localStorage.removeItem('active_server_url');
-                localStorage.removeItem('active_server_name');
-                setActiveServerUrl('');
-                setView('home');
-                setServers(await fetchServers());
+                const result = await leaveCloudServer(activeServerUrl);
+                if (result.ok) {
+                  localStorage.removeItem('active_server_url');
+                  localStorage.removeItem('active_server_name');
+                  setActiveServerUrl('');
+                  setView('home');
+                  setServers(await fetchServers());
+                }
+                return result;
               }}
               onDeleteServer={async () => {
                 const result = await deleteCloudServer(activeServerUrl);

@@ -24,6 +24,7 @@ interface Props {
   activeVoiceChannelId?: string | number | null;
   activeVoiceChannelName?: string | null;
   voiceParticipants?: Participant[];
+  voiceRoomParticipants?: Record<string, string[]>;
   onSelectChannel: (channel: ApiChannel) => void;
   onJoinVoice: (channel: ApiChannel) => void;
   onLeaveVoice?: () => void;
@@ -40,7 +41,7 @@ interface Props {
   voiceErrorMsg?: string;
   isOwner?: boolean;
   isCloudServer?: boolean;
-  onLeaveServer?: () => void;
+  onLeaveServer?: () => Promise<{ ok: boolean; error?: string }>;
   onDeleteServer?: (password: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -59,6 +60,20 @@ const MicIcon = () => (
   <svg className={styles.chIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
     <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+  </svg>
+);
+
+const ArenaIcon = () => (
+  <svg className={styles.chIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 11l19-9-9 19-2-8-8-2z"/>
+  </svg>
+);
+
+const BoardIcon = () => (
+  <svg className={styles.chIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <line x1="9" y1="9" x2="15" y2="9"/>
+    <line x1="9" y1="13" x2="13" y2="13"/>
   </svg>
 );
 
@@ -85,7 +100,7 @@ function AddChannelPopover({
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<'text' | 'voice'>('text');
+  const [type, setType] = useState<'text' | 'voice' | 'arena' | 'board'>('text');
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -117,6 +132,14 @@ function AddChannelPopover({
           className={`${styles.typeBtn} ${type === 'voice' ? styles.typeBtnActive : ''}`}
           onClick={() => setType('voice')}
         >🔊 Voice</button>
+        <button
+          className={`${styles.typeBtn} ${type === 'arena' ? styles.typeBtnActive : ''}`}
+          onClick={() => setType('arena')}
+        >🎙 Arena</button>
+        <button
+          className={`${styles.typeBtn} ${type === 'board' ? styles.typeBtnActive : ''}`}
+          onClick={() => setType('board')}
+        >📋 Board</button>
       </div>
       <input
         className={styles.addPopoverInput}
@@ -367,7 +390,7 @@ function ChannelContextMenu({
 
 type DragItem =
   | { kind: 'cat'; catId: string | number }
-  | { kind: 'ch'; chId: string | number; catId: string | number; chType: 'text' | 'voice' };
+  | { kind: 'ch'; chId: string | number; catId: string | number; chType: 'text' | 'voice' | 'arena' | 'board' };
 
 // ── Footer bar ────────────────────────────────────────────────────────────────
 
@@ -375,6 +398,17 @@ function FooterBar({ identity }: { identity: string }) {
   const [copied, setCopied] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const qrRef = useRef<HTMLDivElement>(null);
+  const [displayName, setDisplayName] = useState(
+    localStorage.getItem('cached_display_name') || identity
+  );
+
+  useEffect(() => {
+    const handler = () => {
+      setDisplayName(localStorage.getItem('cached_display_name') || identity);
+    };
+    window.addEventListener('zeeble:display-name-changed', handler);
+    return () => window.removeEventListener('zeeble:display-name-changed', handler);
+  }, [identity]);
 
   const handleCopy = useCallback(() => {
     if (!identity) return;
@@ -412,7 +446,7 @@ function FooterBar({ identity }: { identity: string }) {
         >
           {copied ? (
             <span style={{ color: 'var(--green)', fontSize: 11, fontWeight: 700 }}>Copied!</span>
-          ) : (identity || 'Me')}
+          ) : (displayName || identity || 'Me')}
         </div>
         <div className={styles.ufId}>Online</div>
       </div>
@@ -456,7 +490,7 @@ function FooterBar({ identity }: { identity: string }) {
 
 export default function Sidebar({
   serverName, categories, activeChannelId, activeVoiceChannelId, activeVoiceChannelName,
-  voiceParticipants,
+  voiceParticipants, voiceRoomParticipants,
   onSelectChannel, onJoinVoice, onLeaveVoice,
   voiceMuted, voiceDeafened, onToggleMute, onToggleDeafen,
   onOpenServerSettings, onOpenInvites, onRefresh,
@@ -471,6 +505,14 @@ export default function Sidebar({
   const [leavePassword, setLeavePassword] = useState('');
   const [leaveError, setLeaveError] = useState('');
   const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveArmed, setLeaveArmed] = useState(false);
+
+  const closeLeaveModal = () => {
+    setLeaveModalOpen(false);
+    setLeaveArmed(false);
+    setLeavePassword('');
+    setLeaveError('');
+  };
 
   const handleLeaveOrDelete = async () => {
     setLeaveLoading(true);
@@ -484,10 +526,11 @@ export default function Sidebar({
       }
       const result = await onDeleteServer(leavePassword);
       if (!result.ok) setLeaveError(result.error ?? 'Failed to delete server');
-      else setLeaveModalOpen(false);
+      else closeLeaveModal();
     } else if (onLeaveServer) {
-      onLeaveServer();
-      setLeaveModalOpen(false);
+      const result = await onLeaveServer();
+      if (result && !result.ok) setLeaveError(result.error ?? 'Failed to leave server');
+      else closeLeaveModal();
     }
     setLeaveLoading(false);
   };
@@ -553,7 +596,7 @@ export default function Sidebar({
 
   // ── Channel drag handlers ────────────────────────────────────────────────
 
-  function onChDragStart(e: React.DragEvent, chId: string | number, catId: string | number, chType: 'text' | 'voice') {
+  function onChDragStart(e: React.DragEvent, chId: string | number, catId: string | number, chType: 'text' | 'voice' | 'arena' | 'board') {
     dragItem.current = { kind: 'ch', chId, catId, chType };
     e.dataTransfer.effectAllowed = 'move';
     e.stopPropagation();
@@ -565,7 +608,7 @@ export default function Sidebar({
     if (dragItem.current?.kind === 'ch') setDragOverChId(chId);
   }
 
-  function onChDrop(e: React.DragEvent, targetChId: string | number, targetCatId: string | number, targetType: 'text' | 'voice') {
+  function onChDrop(e: React.DragEvent, targetChId: string | number, targetCatId: string | number, targetType: 'text' | 'voice' | 'arena' | 'board') {
     e.preventDefault();
     e.stopPropagation();
     if (dragItem.current?.kind !== 'ch') return;
@@ -578,7 +621,7 @@ export default function Sidebar({
       // Find the dragged channel object
       let draggedCh: (typeof prev[0]['textChannels'][0]) | undefined;
       for (const cat of prev) {
-        const chans = chType === 'text' ? cat.textChannels : cat.voiceChannels;
+        const chans = chType === 'text' ? cat.textChannels : chType === 'voice' ? cat.voiceChannels : chType === 'arena' ? cat.arenaChannels : cat.boardChannels;
         const found = chans.find(c => String(c.id) === String(fromChId));
         if (found) { draggedCh = found; break; }
       }
@@ -588,7 +631,9 @@ export default function Sidebar({
       const next = prev.map(cat => {
         const textChs = [...cat.textChannels];
         const voiceChs = [...cat.voiceChannels];
-        const chans = chType === 'text' ? textChs : voiceChs;
+        const arenaChs = [...cat.arenaChannels];
+        const boardChs = [...cat.boardChannels];
+        const chans = chType === 'text' ? textChs : chType === 'voice' ? voiceChs : chType === 'arena' ? arenaChs : boardChs;
 
         // Remove from source
         const fromIdx = chans.findIndex(c => String(c.id) === String(fromChId));
@@ -604,9 +649,7 @@ export default function Sidebar({
         const newCatId = cat.id === '__uncategorized__' ? null : cat.id;
         chans.forEach((c, i) => updateChannelPosition(c.id, i, crossCategory ? newCatId : undefined));
 
-        return chType === 'text'
-          ? { ...cat, textChannels: textChs, voiceChannels: voiceChs }
-          : { ...cat, textChannels: textChs, voiceChannels: voiceChs };
+        return { ...cat, textChannels: textChs, voiceChannels: voiceChs, arenaChannels: arenaChs, boardChannels: boardChs };
       });
       return next;
     });
@@ -625,7 +668,7 @@ export default function Sidebar({
     setOrderedCats(prev => {
       let draggedCh: (typeof prev[0]['textChannels'][0]) | undefined;
       for (const cat of prev) {
-        const chans = chType === 'text' ? cat.textChannels : cat.voiceChannels;
+        const chans = chType === 'text' ? cat.textChannels : chType === 'voice' ? cat.voiceChannels : chType === 'arena' ? cat.arenaChannels : cat.boardChannels;
         const found = chans.find(c => String(c.id) === String(fromChId));
         if (found) { draggedCh = found; break; }
       }
@@ -635,7 +678,9 @@ export default function Sidebar({
       const next = prev.map(cat => {
         const textChs = [...cat.textChannels];
         const voiceChs = [...cat.voiceChannels];
-        const chans = chType === 'text' ? textChs : voiceChs;
+        const arenaChs = [...cat.arenaChannels];
+        const boardChs = [...cat.boardChannels];
+        const chans = chType === 'text' ? textChs : chType === 'voice' ? voiceChs : chType === 'arena' ? arenaChs : boardChs;
 
         // Remove from source
         const fromIdx = chans.findIndex(c => String(c.id) === String(fromChId));
@@ -648,9 +693,7 @@ export default function Sidebar({
           chans.forEach((c, i) => updateChannelPosition(c.id, i, newCatId));
         }
 
-        return chType === 'text'
-          ? { ...cat, textChannels: textChs, voiceChannels: voiceChs }
-          : { ...cat, textChannels: textChs, voiceChannels: voiceChs };
+        return { ...cat, textChannels: textChs, voiceChannels: voiceChs, arenaChannels: arenaChs, boardChannels: boardChs };
       });
       return next;
     });
@@ -685,7 +728,7 @@ export default function Sidebar({
           <button
             className={styles.iconBtn}
             title={isOwner ? 'Delete Server' : 'Leave Server'}
-            onClick={() => { setLeaveModalOpen(true); setLeavePassword(''); setLeaveError(''); }}
+            onClick={() => { setLeaveModalOpen(true); setLeavePassword(''); setLeaveError(''); setLeaveArmed(false); }}
             style={{ color: 'var(--red, #e94560)' }}
           >
             {isOwner ? (
@@ -835,6 +878,8 @@ export default function Sidebar({
                   const isActiveVoice = String(ch.id) === String(activeVoiceChannelId);
                   const isDragChTarget = String(dragOverChId) === String(ch.id);
                   const settingsOpen = String(chSettings) === String(ch.id);
+                  const polledIdentities = voiceRoomParticipants?.[String(ch.id)] ?? [];
+                  const hasPolledUsers = polledIdentities.length > 0;
                   return (
                     <div key={ch.id} className={styles.chItemWrap}>
                     <div
@@ -852,6 +897,9 @@ export default function Sidebar({
                         <MicIcon />
                         <span style={{ flex: 1 }}>{ch.name}</span>
                         {isActiveVoice && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>LIVE</span>}
+                        {!isActiveVoice && hasPolledUsers && (
+                          <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>{polledIdentities.length}</span>
+                        )}
                         <button
                           className={styles.chGearBtn}
                           title="Channel settings"
@@ -885,7 +933,99 @@ export default function Sidebar({
                           ))}
                         </div>
                       )}
+                      {!isActiveVoice && hasPolledUsers && (
+                        <div className={styles.vcUsers}>
+                          {polledIdentities.map(id => (
+                            <div key={id} className={styles.vcUser}>
+                              <UserAvatar name={id} size={20} radius={6} className={styles.vcAvatar} />
+                              <span>{id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                      {settingsOpen && (
+                        <ChannelSettingsPopover
+                          chId={ch.id}
+                          chName={ch.name}
+                          onDone={() => { setChSettings(null); onRefresh?.(); }}
+                          onCancel={() => setChSettings(null)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+                {cat.arenaChannels.map(ch => {
+                  const isActiveArena = String(ch.id) === String(activeVoiceChannelId);
+                  const isDragChTarget = String(dragOverChId) === String(ch.id);
+                  const settingsOpen = String(chSettings) === String(ch.id);
+                  return (
+                    <div key={ch.id} className={styles.chItemWrap}>
+                      <div
+                        draggable
+                        className={`${styles.voiceCard} ${isActiveArena ? styles.vcActive : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
+                        onClick={() => onJoinVoice(ch)}
+                        onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
+                        onDragStart={e => onChDragStart(e, ch.id, cat.id, 'arena')}
+                        onDragOver={e => onChDragOver(e, ch.id)}
+                        onDrop={e => onChDrop(e, ch.id, cat.id, 'arena')}
+                        onDragEnd={onDragEnd}
+                      >
+                        <div className={styles.vcHeader}>
+                          <GripIcon />
+                          <ArenaIcon />
+                          <span style={{ flex: 1 }}>{ch.name}</span>
+                          {isActiveArena && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>LIVE</span>}
+                          <button
+                            className={styles.chGearBtn}
+                            title="Channel settings"
+                            onClick={e => { e.stopPropagation(); setChSettings(settingsOpen ? null : ch.id); setCatSettings(null); }}
+                          >
+                            <GearIcon />
+                          </button>
+                        </div>
+                      </div>
+                      {settingsOpen && (
+                        <ChannelSettingsPopover
+                          chId={ch.id}
+                          chName={ch.name}
+                          onDone={() => { setChSettings(null); onRefresh?.(); }}
+                          onCancel={() => setChSettings(null)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+                {cat.boardChannels.map(ch => {
+                  const isActive = String(ch.id) === String(activeChannelId);
+                  const isDragChTarget = String(dragOverChId) === String(ch.id);
+                  const settingsOpen = String(chSettings) === String(ch.id);
+                  return (
+                    <div key={ch.id} className={styles.chItemWrap}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        draggable
+                        className={`${styles.chItem} ${isActive ? styles.active : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
+                        onClick={() => onSelectChannel(ch)}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChannel(ch); } }}
+                        onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
+                        onDragStart={e => onChDragStart(e, ch.id, cat.id, 'board')}
+                        onDragOver={e => onChDragOver(e, ch.id)}
+                        onDrop={e => onChDrop(e, ch.id, cat.id, 'board')}
+                        onDragEnd={onDragEnd}
+                      >
+                        <GripIcon />
+                        <BoardIcon />
+                        <span className={styles.chName}>{ch.name}</span>
+                        <button
+                          className={styles.chGearBtn}
+                          title="Channel settings"
+                          onClick={e => { e.stopPropagation(); setChSettings(settingsOpen ? null : ch.id); setCatSettings(null); }}
+                        >
+                          <GearIcon />
+                        </button>
+                      </div>
                       {settingsOpen && (
                         <ChannelSettingsPopover
                           chId={ch.id}
@@ -984,7 +1124,7 @@ export default function Sidebar({
           position: 'fixed', inset: 0, zIndex: 1000,
           background: 'rgba(0,0,0,0.6)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }} onClick={() => setLeaveModalOpen(false)}>
+        }} onClick={closeLeaveModal}>
           <div style={{
             background: 'var(--bg-panel, #1e2028)',
             border: '1px solid rgba(255,255,255,0.08)',
@@ -1020,22 +1160,33 @@ export default function Sidebar({
             {leaveError && <div style={{ fontSize: 12, color: 'var(--red, #e94560)' }}>{leaveError}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button
-                onClick={() => setLeaveModalOpen(false)}
+                onClick={closeLeaveModal}
                 style={{
                   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
                   borderRadius: 8, padding: '8px 16px', color: 'var(--text-2)', fontSize: 13, cursor: 'pointer',
                 }}
               >Cancel</button>
               <button
-                onClick={handleLeaveOrDelete}
+                onClick={() => {
+                  if (isOwner) {
+                    handleLeaveOrDelete();
+                  } else if (!leaveArmed) {
+                    setLeaveArmed(true);
+                    setTimeout(() => setLeaveArmed(false), 3000);
+                  } else {
+                    handleLeaveOrDelete();
+                  }
+                }}
                 disabled={leaveLoading || (isOwner ? !leavePassword : false)}
                 style={{
-                  background: 'var(--red, #e94560)', border: 'none', borderRadius: 8,
-                  padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600,
+                  background: leaveArmed ? 'var(--red, #e94560)' : 'rgba(233,69,96,0.35)',
+                  border: leaveArmed ? 'none' : '1px solid var(--red, #e94560)',
+                  borderRadius: 8, padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600,
                   cursor: 'pointer', opacity: leaveLoading ? 0.6 : 1,
+                  transition: 'background 0.2s, border 0.2s',
                 }}
               >
-                {leaveLoading ? '…' : isOwner ? 'Delete Server' : 'Leave Server'}
+                {leaveLoading ? '…' : isOwner ? 'Delete Server' : leaveArmed ? 'Click again to confirm' : 'Leave Server'}
               </button>
             </div>
           </div>

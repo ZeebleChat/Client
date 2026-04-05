@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { getWsUrl, getServerUrl } from '../config';
 import { getToken, getChatToken, getBeamIdentity } from '../auth';
-import type { ApiMessage, ApiMemberGroup } from '../api';
+import type { ApiMessage, ApiMemberGroup, ApiChannel } from '../api';
 
 const WS_RECONNECT_INITIAL_DELAY_MS = 3000;
 const WS_RECONNECT_MAX_DELAY_MS = 30000;
@@ -11,7 +11,10 @@ export type WsEvent =
   | { type: 'message'; msg: ApiMessage }
   | { type: 'message_edited'; id: string | number; channel_id: string | number; content: string; edited_at?: string }
   | { type: 'message_deleted'; id: string | number; channel_id: string | number }
-  | { type: 'member'; groups: ApiMemberGroup[] };
+  | { type: 'member'; groups: ApiMemberGroup[] }
+  | { type: 'channel_created'; channel: ApiChannel }
+  | { type: 'channel_deleted'; channel_id: string | number }
+  | { type: 'channel_renamed'; channel: ApiChannel };
 
 interface UseWebSocketOptions {
   serverUrl: string;
@@ -119,6 +122,15 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
 
       if (msg.type === 'member' && Array.isArray(msg.members)) {
         onEventRef.current({ type: 'member', groups: msg.members as ApiMemberGroup[] });
+      }
+      if (msg.type === 'channel_created' && msg.channel) {
+        onEventRef.current({ type: 'channel_created', channel: msg.channel as ApiChannel });
+      }
+      if (msg.type === 'channel_deleted' && msg.channel_id != null) {
+        onEventRef.current({ type: 'channel_deleted', channel_id: msg.channel_id as string });
+      }
+      if (msg.type === 'channel_renamed' && msg.channel) {
+        onEventRef.current({ type: 'channel_renamed', channel: msg.channel as ApiChannel });
       }
     };
   // connect uses refs for all dynamic values — deps intentionally omitted

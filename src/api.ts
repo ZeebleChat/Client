@@ -249,7 +249,7 @@ export async function fetchServerInfo(serverUrl: string): Promise<ServerInfo | n
 export interface ApiChannel {
   id: string | number;
   name: string;
-  type: 'text' | 'voice' | 'category';
+  type: 'text' | 'voice' | 'category' | 'arena' | 'board';
   category_id?: string | number | null;
   position?: number;
   topic?: string;
@@ -454,7 +454,7 @@ export async function leaveCloudServer(serverUrl: string): Promise<{ ok: boolean
   const identity = getBeamIdentity();
   if (!identity) return { ok: false, error: 'Not logged in' };
   try {
-    const res = await authedFetch(`${serverUrl}/members/${encodeURIComponent(identity)}`, { method: 'DELETE' });
+    const res = await authedFetch(`${serverUrl}/v1/members/${encodeURIComponent(identity)}`, { method: 'DELETE' });
     return { ok: res.ok || res.status === 204 };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -922,6 +922,7 @@ export interface ApiAccountInfo {
   children?: ApiSubAccount[];
   alts?: ApiSubAccount[];
   bots?: ApiSubAccount[];
+  streamers?: ApiSubAccount[];
   email?: string | null;
 }
 
@@ -1087,7 +1088,7 @@ export async function fetchPublicProfile(beamIdentity: string): Promise<PublicPr
 
 export async function createSubAccount(
   displayName: string,
-  accountType: 'alt' | 'child' | 'bot',
+  accountType: 'alt' | 'child' | 'bot' | 'streamer',
   password?: string,
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   try {
