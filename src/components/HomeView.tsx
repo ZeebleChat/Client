@@ -18,6 +18,7 @@ import {
   type ApiDmMessage,
 } from '../api';
 import { getBeamIdentity, getToken } from '../auth';
+import { useNotifications } from '../hooks/useNotifications';
 import { getDmUrl } from '../config';
 import { setAvatarCache } from '../avatarCache';
 import UserAvatar from './UserAvatar';
@@ -682,6 +683,7 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
   const [conversations, setConversations] = useState<DmConversation[]>([]);
   const [dmWs, setDmWs] = useState<WebSocket | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const { notifyDm } = useNotifications();
 
   // Build DM conversation list from friends list
   useEffect(() => {
@@ -717,7 +719,7 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
 
     const wsUrl = rawUrl.replace(/^http/, 'ws');
     const token = getToken();
-    const url = `${wsUrl}/dm/ws?token=${encodeURIComponent(token ?? '')}`;
+    const url = `${wsUrl}/ws?token=${encodeURIComponent(token ?? '')}`;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
@@ -742,6 +744,7 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
                 : c
             );
           });
+          notifyDm(fromBeam, data.content ?? '');
         }
       } catch {
         // ignore

@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Zeeble",
   "version": "0.1.0",
-  "identifier": "xyz.zeeble.app",
+  "identifier": "xyz.zeeble.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",

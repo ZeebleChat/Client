@@ -148,7 +148,14 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
       >
         Z
       </button>
-      <div className={styles.sep} />
+      <button
+        className={styles.addServerBar}
+        title="Add Server"
+        aria-label="Add server"
+        onClick={onAddServer}
+      >
+        <span className={styles.addServerBarPlus}>+</span>
+      </button>
 
       {servers.map(server => {
         const isActive = view === 'server' && server.server_url === activeServerUrl;
@@ -180,12 +187,6 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
           </button>
         );
       })}
-
-      {servers.length === 0 && (
-        <button className={styles.node} title="Add Server" onClick={onAddServer} aria-label="Add server">
-          <span style={{ fontSize: 20, lineHeight: 1 }}>+</span>
-        </button>
-      )}
 
       {/* Context Menu */}
       {contextMenu.visible && (

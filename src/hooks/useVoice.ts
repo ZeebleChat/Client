@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { getServerUrl } from '../config';
 import { getChatToken } from '../auth';
+import { invoke } from '@tauri-apps/api/core';
 import type { ApiChannel } from '../api';
 
 const MIC_LEVEL_MULTIPLIER = 400;
@@ -310,9 +311,7 @@ export function useVoice() {
     }
     screenCanvasRef.current = null;
     if ('__TAURI_INTERNALS__' in window) {
-      import('@tauri-apps/api/core').then(({ invoke }) =>
-        invoke('stop_screen_capture').catch(() => {})
-      );
+      invoke('stop_screen_capture').catch(() => {});
     }
     set({ isScreenSharing: false });
   }, []);
@@ -324,7 +323,6 @@ export function useVoice() {
     set({ showScreenPicker: false });
 
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       const { listen } = await import('@tauri-apps/api/event');
       await invoke('start_screen_capture', { sourceId });
 

@@ -26,6 +26,42 @@
   font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
+.addServerBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: calc(100% - 16px);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-dark);
+  box-shadow: var(--neu-out-sm);
+  border: var(--border-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.addServerBar:hover {
+  color: var(--accent);
+  box-shadow: 6px 6px 12px var(--shadow-dark), -3px -3px 8px var(--shadow-light);
+  transform: translateY(-1px);
+}
+
+.addServerBarPlus {
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.addServerBarLabel {
+  line-height: 1;
+}
+
 .sep {
   width: 40px;
   height: 2px;

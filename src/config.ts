@@ -1,6 +1,5 @@
 export const ENV_AUTH_URL = import.meta.env.VITE_AUTH_URL || 'https://api.zeeble.xyz';
-// DM shares origin with auth by default
-export const ENV_DM_URL = import.meta.env.VITE_DM_URL || ENV_AUTH_URL;
+export const ENV_DM_URL = import.meta.env.VITE_DM_URL || 'https://dm.zeeble.xyz';
 export const ENV_ZCLOUD_URL = import.meta.env.VITE_ZCLOUD_URL || 'https://cloud.zeeble.xyz';
 export const ENV_TENOR_KEY: string = import.meta.env.VITE_TENOR_API_KEY || '';
 

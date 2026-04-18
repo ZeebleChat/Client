@@ -164,6 +164,7 @@ export function buildChatMessagePayload(
   channelId: string | number,
   content: string,
   attachmentIds: (string | number)[] = [],
+  opts?: { title?: string; replyTo?: string | number },
 ) {
   const serverUrl = getServerUrl();
   const token = getChatToken(serverUrl) || getToken();
@@ -175,6 +176,8 @@ export function buildChatMessagePayload(
       token,
       channel_id: String(channelId),
       content,
+      ...(opts?.title ? { title: opts.title } : {}),
+      ...(opts?.replyTo != null ? { reply_to: String(opts.replyTo) } : {}),
       ...(isCloud
         ? { attachment_id: attachmentIds[0] }
         : { attachment_ids: attachmentIds }),
@@ -184,6 +187,8 @@ export function buildChatMessagePayload(
       channel_id: channelId,
       beam_identity: beamId,
       content,
+      title: opts?.title ?? null,
+      reply_to: opts?.replyTo ?? null,
       created_at: Math.floor(Date.now() / 1000),
       attachments: [],
     } satisfies ApiMessage,

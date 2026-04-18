@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   fetchServers,
   fetchChannels,
@@ -25,6 +25,7 @@ import { useTheme } from './hooks/useTheme';
 
 import Sidebar from './components/Sidebar';
 import ChatMain from './components/ChatMain';
+import BoardView from './components/BoardView';
 import Members from './components/Members';
 import Login from './components/Login';
 import styles from './App.module.css';
@@ -41,6 +42,7 @@ import TitleBar from './components/TitleBar';
 import { useVoice } from './hooks/useVoice';
 import { useHealthCheck } from './hooks/useHealthCheck';
 import { useVoiceRooms } from './hooks/useVoiceRooms';
+import { useNotifications } from './hooks/useNotifications';
 import StatusBanner from './components/StatusBanner';
 
 export default function App() {
@@ -73,6 +75,12 @@ export default function App() {
     localStorage.getItem('active_server_url') ? 'server' : 'home'
   );
 
+  const { notifyMessage } = useNotifications();
+  const channelsRef = useRef(channels);
+  useEffect(() => { channelsRef.current = channels; }, [channels]);
+  const activeChannelRef = useRef(activeChannel);
+  useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
+
   const handleWsEvent = useCallback((event: import('./hooks/useWebSocket').WsEvent) => {
     if (event.type === 'message') {
       setMessages(prev => {
@@ -95,6 +103,14 @@ export default function App() {
         }
         return [...prev, event.msg];
       });
+      const ch = channelsRef.current.find(c => String(c.id) === String(event.msg.channel_id));
+      notifyMessage(
+        ch?.name ?? 'channel',
+        event.msg.beam_identity,
+        event.msg.content,
+        activeChannelRef.current?.id ?? null,
+        event.msg.channel_id
+      );
     }
     if (event.type === 'message_edited') {
       setMessages(prev =>
@@ -208,6 +224,20 @@ export default function App() {
   const handleSend = useCallback((content: string, attachmentIds?: (string | number)[]) => {
     if (!activeChannel) return;
     const { payload, optimistic } = buildChatMessagePayload(activeChannel.id, content, attachmentIds);
+    setMessages(prev => [...prev, { ...optimistic, _optimistic: true } as ApiMessage]);
+    send(payload);
+  }, [activeChannel, send]);
+
+  const handleCreatePost = useCallback((title: string, content: string) => {
+    if (!activeChannel) return;
+    const { payload, optimistic } = buildChatMessagePayload(activeChannel.id, content, [], { title });
+    setMessages(prev => [...prev, { ...optimistic, _optimistic: true } as ApiMessage]);
+    send(payload);
+  }, [activeChannel, send]);
+
+  const handleReply = useCallback((content: string, replyTo: string | number) => {
+    if (!activeChannel) return;
+    const { payload, optimistic } = buildChatMessagePayload(activeChannel.id, content, [], { replyTo });
     setMessages(prev => [...prev, { ...optimistic, _optimistic: true } as ApiMessage]);
     send(payload);
   }, [activeChannel, send]);
@@ -370,14 +400,25 @@ export default function App() {
                 return result;
               }}
             />
-            <ChatMain
-              channelName={activeChannel?.name ?? 'Select a channel'}
-              channelId={activeChannel?.id ?? null}
-              messages={messages}
-              onSend={handleSend}
-              loading={messagesLoading}
-              roleMap={roleMap}
-            />
+            {activeChannel?.type === 'board' ? (
+              <BoardView
+                channelId={activeChannel.id}
+                channelName={activeChannel.name}
+                liveMessages={messages}
+                onCreatePost={handleCreatePost}
+                onReply={handleReply}
+                roleMap={roleMap}
+              />
+            ) : (
+              <ChatMain
+                channelName={activeChannel?.name ?? 'Select a channel'}
+                channelId={activeChannel?.id ?? null}
+                messages={messages}
+                onSend={handleSend}
+                loading={messagesLoading}
+                roleMap={roleMap}
+              />
+            )}
             <Members groups={memberGroups} onDm={() => setView('home')} />
           </>
         )}

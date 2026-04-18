@@ -79,7 +79,7 @@ export default function Login({ onLogin }: Props) {
     try {
       let result;
       if (isRegister) {
-        result = await registerReq('', password, displayName.trim() || undefined, email.trim());
+        result = await registerReq(displayName.trim(), password, email.trim());
       } else {
         result = await loginReq(identity.trim(), password);
       }

@@ -134,7 +134,7 @@ function ProfileTab() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { setEmailStatus({ ok: false, msg: 'Please enter a valid email address.' }); return; }
     setEmailSending(true);
     setEmailStatus(null);
-    const token = (await import('../auth')).getToken() ?? '';
+    const token = getToken() ?? '';
     const result = await sendEmailPinReq(token, trimmed);
     setEmailSending(false);
     if (!result.ok) {
@@ -151,7 +151,7 @@ function ProfileTab() {
     if (!emailPin.trim()) { setEmailStatus({ ok: false, msg: 'Enter the 6-digit code.' }); return; }
     setEmailPinVerifying(true);
     setEmailStatus(null);
-    const token = (await import('../auth')).getToken() ?? '';
+    const token = getToken() ?? '';
     const result = await verifyEmailPinReq(token, emailPin.trim());
     setEmailPinVerifying(false);
     if (!result.ok) {
@@ -1283,7 +1283,7 @@ function SubaccountsTab() {
 
 // freeVal / premiumVal: a string value, 'check', 'included', or null (= X mark)
 const PREMIUM_PERKS: { label: string; freeVal: string | 'check' | 'included' | null; premiumVal: string | 'check' | 'included' | null; tooltip?: string }[] = [
-  { label: 'Join server',                        freeVal: '10',       premiumVal: '200'      },
+  { label: 'Join server',                        freeVal: '100',       premiumVal: '200'      },
   { label: 'Zeeble cloud servers (create)',      freeVal: '10',       premiumVal: '30'       },
   { label: 'Sub-accounts',                       freeVal: '10',       premiumVal: '20'       },
   { label: 'Message search',                     freeVal: 'included', premiumVal: 'included' },
@@ -1781,6 +1781,9 @@ function NotificationsTab() {
   useEffect(() => {
     if (!('Notification' in window)) { setPermState('unsupported'); return; }
     setPermState(Notification.permission);
+    const onFocus = () => setPermState(Notification.permission);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   async function requestPermission() {
@@ -1799,7 +1802,7 @@ function NotificationsTab() {
         <div className={styles.notifHint}>Desktop notifications are not supported in this browser.</div>
       )}
       {permState === 'denied' && (
-        <div className={styles.notifWarn}>Notifications blocked — allow them in your browser settings.</div>
+        <div className={styles.notifWarn}>Notifications blocked — re-enable them in your system notification settings, then return here.</div>
       )}
       {permState === 'default' && (
         <button className={styles.notifPermBtn} onClick={requestPermission}>

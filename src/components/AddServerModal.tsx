@@ -103,8 +103,6 @@ export default function AddServerModal({ onClose, onAdded }: Props) {
         setCreateStatus('error');
         return;
       }
-      // Register with auth server
-      await addServer(result.data.server_url, result.data.name);
       setCreateStatus('idle');
       onAdded();
       onClose();

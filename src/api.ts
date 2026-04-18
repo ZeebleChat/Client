@@ -1,4 +1,4 @@
-import { getAuthUrl, getZcloudUrl, getServerUrl, getDmUrl, isZcloudUrl } from './config';
+import { getAuthUrl, getServerUrl, getDmUrl, isZcloudUrl } from './config';
 import {
   getToken,
   getUid,
@@ -130,15 +130,14 @@ export interface RegisterResult {
 }
 
 export async function registerReq(
-  beam_identity: string,
+  display_name: string,
   password: string,
-  display_name?: string,
   email?: string
 ): Promise<RegisterResult> {
   const res = await fetch(`${getAuthUrl()}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ beam_identity, password, display_name, email }),
+    body: JSON.stringify({ display_name, password, email }),
   });
   const data = await safeJson(res) as RegisterResult['data'];
   return { ok: res.ok, status: res.status, data };
@@ -294,6 +293,8 @@ export interface ApiMessage {
   channel_id: string | number;
   beam_identity: string;
   content: string;
+  title?: string | null;
+  reply_to?: string | number | null;
   created_at: number | string;
   attachments?: ApiAttachment[];
   edited_at?: string | null;
@@ -306,6 +307,26 @@ export async function fetchMessages(channelId: string | number): Promise<ApiMess
     );
     if (!res.ok) return [];
     return unwrapArray<ApiMessage>(await res.json(), 'messages');
+  } catch { return []; }
+}
+
+export async function fetchBoardPosts(channelId: string | number): Promise<ApiMessage[]> {
+  try {
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts`
+    );
+    if (!res.ok) return [];
+    return unwrapArray<ApiMessage>(await res.json(), 'posts');
+  } catch { return []; }
+}
+
+export async function fetchPostReplies(channelId: string | number, postId: string | number): Promise<ApiMessage[]> {
+  try {
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts/${encodeURIComponent(String(postId))}/replies`
+    );
+    if (!res.ok) return [];
+    return unwrapArray<ApiMessage>(await res.json(), 'replies');
   } catch { return []; }
 }
 
@@ -437,7 +458,7 @@ export async function createCloudServer(name: string, about = ''): Promise<{ ok:
   try {
     const body: Record<string, string> = { name };
     if (about.trim()) body.about = about.trim();
-    const res = await authedFetch(`${getZcloudUrl()}/servers`, {
+    const res = await authedFetch(`${getAuthUrl()}/servers/cloud`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -546,7 +567,7 @@ export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string
 
 export async function createChannel(
   name: string,
-  type: 'text' | 'voice' = 'text',
+  type: 'text' | 'voice' | 'arena' | 'board' = 'text',
   categoryId: string | number | null = null,
   position = 0
 ): Promise<{ ok: boolean; data?: ApiChannel; error?: string }> {
