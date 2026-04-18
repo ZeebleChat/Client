@@ -635,14 +635,24 @@ export default function Sidebar({
         const boardChs = [...cat.boardChannels];
         const chans = chType === 'text' ? textChs : chType === 'voice' ? voiceChs : chType === 'arena' ? arenaChs : boardChs;
 
-        // Remove from source
         const fromIdx = chans.findIndex(c => String(c.id) === String(fromChId));
-        if (fromIdx >= 0) chans.splice(fromIdx, 1);
+        const isSameCat = String(cat.id) === String(fromCatId) && String(cat.id) === String(targetCatId);
 
-        // Insert at target position if this is the target category
-        if (String(cat.id) === String(targetCatId)) {
-          const toIdx = chans.findIndex(c => String(c.id) === String(targetChId));
-          chans.splice(toIdx >= 0 ? toIdx : chans.length, 0, ch);
+        if (isSameCat) {
+          // Capture target index BEFORE removal so direction is preserved
+          const toIdxOrig = chans.findIndex(c => String(c.id) === String(targetChId));
+          if (fromIdx >= 0) chans.splice(fromIdx, 1);
+          // When dragging downward, target shifts left by 1 after removal — insert after it
+          const insertAt = fromIdx < toIdxOrig ? toIdxOrig : toIdxOrig >= 0 ? toIdxOrig : chans.length;
+          chans.splice(insertAt, 0, ch);
+        } else {
+          // Cross-category: remove from source category
+          if (fromIdx >= 0) chans.splice(fromIdx, 1);
+          // Insert into target category
+          if (String(cat.id) === String(targetCatId)) {
+            const toIdx = chans.findIndex(c => String(c.id) === String(targetChId));
+            chans.splice(toIdx >= 0 ? toIdx : chans.length, 0, ch);
+          }
         }
 
         // Persist positions for this category's channels
