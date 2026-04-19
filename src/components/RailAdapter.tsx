@@ -3,7 +3,7 @@
  * Renders server list with initials derived from server names.
  * Supports right-click context menu for server actions (leave server).
  */
-import { useState, useEffect, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, type MouseEvent } from 'react';
 import type { ApiServer } from '../api';
 import { getServerAttachmentUrl } from '../api';
 import { getChatToken } from '../auth';
@@ -40,8 +40,19 @@ function serverInitials(name: string): string {
 /** Map of serverUrl → icon src (data URL or attachment URL), null if none */
 const _iconCache = new Map<string, string | null>();
 
+const HEALTH_INTERVAL = 30_000;
+
+async function pingServer(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch { return false; }
+}
+
 export default function RailAdapter({ servers, activeServerUrl, view, onSelectServer, onHome, onLeaveServer, onAddServer }: Props) {
   const [icons, setIcons] = useState<Record<string, string | null>>({});
+  const [offlineServers, setOfflineServers] = useState<Set<string>>(new Set());
+  const offlineRef = useRef<Set<string>>(new Set());
 
   // Fetch server icons from /server/info for each server
   useEffect(() => {
@@ -80,6 +91,23 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
   useEffect(() => {
     if (activeServerUrl) _iconCache.delete(activeServerUrl);
   }, [activeServerUrl, getChatToken(activeServerUrl)]);
+
+  // Poll health for all servers and track which are offline
+  useEffect(() => {
+    let alive = true;
+    async function checkAll() {
+      const results = await Promise.all(servers.map(s => pingServer(s.server_url).then(up => ({ url: s.server_url, up }))));
+      if (!alive) return;
+      const newOffline = new Set(results.filter(r => !r.up).map(r => r.url));
+      if ([...newOffline].join() !== [...offlineRef.current].join()) {
+        offlineRef.current = newOffline;
+        setOfflineServers(newOffline);
+      }
+    }
+    checkAll();
+    const id = setInterval(checkAll, HEALTH_INTERVAL);
+    return () => { alive = false; clearInterval(id); };
+  }, [servers]);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
@@ -160,11 +188,12 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
       {servers.map(server => {
         const isActive = view === 'server' && server.server_url === activeServerUrl;
         const iconUrl = icons[server.server_url];
+        const isOffline = offlineServers.has(server.server_url);
         return (
           <button
             key={server.server_url}
             className={`${styles.node} ${isActive ? styles.active : ''} ${iconUrl ? railStyles.nodeWithIcon : ''}`}
-            title={server.server_name}
+            title={isOffline ? `${server.server_name} (offline)` : server.server_name}
             onClick={() => onSelectServer(server.server_url, server.server_name)}
             onContextMenu={(e) => handleContextMenu(e, server)}
             aria-label={`Select ${server.server_name} server`}
@@ -184,6 +213,7 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
                 {serverInitials(server.server_name)}
               </span>
             )}
+            {isOffline && <span className={railStyles.offlineDot} aria-label="offline" />}
           </button>
         );
       })}

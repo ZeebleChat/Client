@@ -1,3 +1,15 @@
+.offlineDot {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid var(--bg-dark);
+  pointer-events: none;
+}
+
 /* When node has an actual icon image, remove the generic icon padding */
 .nodeWithIcon {
   padding: 0;

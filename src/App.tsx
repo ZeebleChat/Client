@@ -36,9 +36,11 @@ import AddServerModal from './components/AddServerModal';
 import HomeView from './components/HomeView';
 import AccountModal from './components/AccountModal';
 import ServerSettingsModal from './components/ServerSettingsModal';
+import DevPanel from './components/DevPanel';
 import ScreenShareOverlay from './components/ScreenShareOverlay';
 import ScreenPickerModal from './components/ScreenPickerModal';
 import TitleBar from './components/TitleBar';
+import PermissionsSetup from './components/PermissionsSetup';
 import { useVoice } from './hooks/useVoice';
 import { useHealthCheck } from './hooks/useHealthCheck';
 import { useVoiceRooms } from './hooks/useVoiceRooms';
@@ -48,6 +50,24 @@ import StatusBanner from './components/StatusBanner';
 export default function App() {
   useTheme();
   const [authed, setAuthed] = useState(isAuthenticated());
+  const [permissionsReady, setPermissionsReady] = useState(
+    () => localStorage.getItem('permissions_setup_done') === '1'
+  );
+
+  // Check existing permission grants so returning users skip the setup screen.
+  useEffect(() => {
+    if (!authed) return;
+    if (permissionsReady) return;
+    Promise.all([
+      navigator.permissions.query({ name: 'microphone' as PermissionName }).catch(() => ({ state: 'prompt' })),
+    ]).then(([mic]) => {
+      const notif = 'Notification' in window ? Notification.permission : 'granted';
+      if (mic.state === 'granted' && notif === 'granted') {
+        localStorage.setItem('permissions_setup_done', '1');
+        setPermissionsReady(true);
+      }
+    });
+  }, [authed]);
 
   const [servers, setServers] = useState<ApiServer[]>([]);
   const [activeServerUrl, setActiveServerUrl] = useState<string>(
@@ -69,6 +89,7 @@ export default function App() {
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [devPanelOpen, setDevPanelOpen] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsInitialTab, setServerSettingsInitialTab] = useState<'overview' | 'categories' | 'roles' | 'invites'>('overview');
   const [view, setView] = useState<'server' | 'home'>(
@@ -322,6 +343,15 @@ export default function App() {
     );
   }
 
+  if (!permissionsReady) {
+    return (
+      <>
+        <TitleBar />
+        <PermissionsSetup onDone={() => { localStorage.setItem('permissions_setup_done', '1'); setPermissionsReady(true); }} />
+      </>
+    );
+  }
+
   return (
     <div className={styles.root}>
       <TitleBar />
@@ -450,6 +480,7 @@ export default function App() {
             onLogout={() => { setAccountOpen(false); forceLogout(); setAuthed(false); }}
             onDm={() => { setAccountOpen(false); setView('home'); }}
             onSwitchServer={(url, name) => { setAccountOpen(false); setView('server'); switchServer(url, name); }}
+            onOpenDevPanel={() => { setAccountOpen(false); setDevPanelOpen(true); }}
           />
         )}
         {serverSettingsOpen && (
@@ -464,6 +495,9 @@ export default function App() {
               setMemberGroups(mems);
             }}
           />
+        )}
+        {devPanelOpen && (
+          <DevPanel onClose={() => setDevPanelOpen(false)} />
         )}
         <StatusBanner status={healthStatus} />
       </div>

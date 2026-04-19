@@ -1,0 +1,182 @@
+.screen {
+  width: 100vw;
+  height: calc(100vh - 38px);
+  background: var(--bg-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  width: 440px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-l);
+  padding: 40px 36px 32px;
+  box-shadow: var(--neu-out);
+  border: var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.brand {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-h));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+  color: white;
+  box-shadow: 0 0 22px var(--accent-glow), var(--neu-out-sm);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  margin-bottom: 20px;
+}
+
+.title {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 6px;
+  text-align: center;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+  line-height: 1.6;
+  margin: 0 0 28px;
+  max-width: 320px;
+}
+
+/* Permission item rows */
+.permList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.permItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-dark);
+  border-radius: var(--radius-s);
+  padding: 13px 16px;
+  box-shadow: var(--neu-in-sm);
+  border: 1px solid var(--border-soft, rgba(255,255,255,0.06));
+}
+
+.permIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-h));
+  box-shadow: 0 0 14px var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.permIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.permInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.permName {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0 0 2px;
+}
+
+.permDesc {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.permStatus {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 20px;
+}
+
+.permStatus[data-state="granted"] {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--green, #10b981);
+}
+
+.permStatus[data-state="needed"] {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent, #6366f1);
+}
+
+.permStatus[data-state="system"] {
+  background: rgba(107, 114, 128, 0.15);
+  color: var(--text-3, #6b7280);
+}
+
+/* Allow all button */
+.allowBtn {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--radius-s);
+  background: linear-gradient(135deg, var(--accent), var(--accent-h));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 18px var(--accent-glow, rgba(99,102,241,0.4));
+  transition: opacity 0.15s, transform 0.12s;
+  margin-bottom: 10px;
+}
+
+.allowBtn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.allowBtn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.allowBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.skipBtn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.skipBtn:hover {
+  color: var(--text-2);
+}

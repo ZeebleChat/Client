@@ -6,8 +6,9 @@ import TenorPicker from './TenorPicker';
 import UserPopup, { type UserPopupInfo, type UserPopupPos } from './UserPopup';
 import VideoPlayer from './VideoPlayer';
 import Lightbox from './Lightbox';
-import type { ApiMessage } from '../api';
-import { getRoleColor, uploadFile, getAttachmentUrl } from '../api';
+import type { ApiMessage, ApiEditHistoryEntry } from '../api';
+import { getRoleColor, uploadFile, getAttachmentUrl, editMessage, fetchMessageHistory } from '../api';
+import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
 import { formatTime } from '../types';
 import styles from './ChatMain.module.css';
@@ -81,27 +82,161 @@ function AttachmentView({ att }: { att: NonNullable<ApiMessage['attachments']>[n
   );
 }
 
-function MessageRow({ msg, onUserClick, roleMap }: { msg: ApiMessage & { _optimistic?: boolean }; onUserClick: (e: React.MouseEvent, name: string) => void; roleMap?: Record<string, string | null | undefined> }) {
+interface HistoryState {
+  entries: ApiEditHistoryEntry[];
+  // viewIdx: 0..entries.length-1 = historical snapshot, entries.length = current version
+  viewIdx: number;
+  open: boolean;
+}
+
+interface MessageRowProps {
+  msg: ApiMessage & { _optimistic?: boolean };
+  onUserClick: (e: React.MouseEvent, name: string) => void;
+  roleMap?: Record<string, string | null | undefined>;
+  isMyMsg: boolean;
+  isEditing: boolean;
+  editValue: string;
+  editInputRef?: React.RefObject<HTMLInputElement | null>;
+  onEditChange: (v: string) => void;
+  onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onStartEdit: () => void;
+  historyState?: HistoryState;
+  onHistoryToggle: () => void;
+  onHistoryNav: (dir: -1 | 1) => void;
+}
+
+function MessageRow({
+  msg, onUserClick, roleMap,
+  isMyMsg, isEditing, editValue, editInputRef, onEditChange, onEditKeyDown,
+  onStartEdit, historyState, onHistoryToggle, onHistoryNav,
+}: MessageRowProps) {
   const color = getUserColor(msg.beam_identity, roleMap);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!dropdownRef.current?.contains(e.target as Node)) setDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [dropdownOpen]);
+
+  const viewingHistory = historyState?.open && historyState.viewIdx < historyState.entries.length;
+  const histEntries = historyState?.entries ?? [];
+  const histIdx = historyState?.viewIdx ?? histEntries.length;
+  const totalVersions = histEntries.length + 1; // +1 for current
+
+  const hasActions = (isMyMsg || !!msg.edited_at) && !msg._optimistic;
+
   return (
-    <div className={`${styles.msgRow} ${msg._optimistic ? styles.optimistic : ''}`}>
+    <div className={`${styles.msgRow} ${msg._optimistic ? styles.optimistic : ''} ${isEditing ? styles.editingRow : ''}`}>
       <button className={styles.msgAvBtn} onClick={e => onUserClick(e, msg.beam_identity)}>
         <UserAvatar name={msg.beam_identity} size={36} radius={12} color={color} className={styles.msgAv} />
       </button>
       <div className={styles.msgContent}>
+      {hasActions && !isEditing && (
+        <div className={styles.msgActions} ref={dropdownRef}>
+          <button
+            className={styles.msgActionsBtn}
+            onClick={() => setDropdownOpen(o => !o)}
+            title="Message actions"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+            </svg>
+          </button>
+          {dropdownOpen && (
+            <div className={styles.msgDropdown}>
+              {isMyMsg && (
+                <button className={styles.msgDropdownItem} onClick={() => { setDropdownOpen(false); onStartEdit(); }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                  Edit message
+                </button>
+              )}
+              {msg.edited_at && (
+                <button className={styles.msgDropdownItem} onClick={() => { setDropdownOpen(false); onHistoryToggle(); }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
+                  </svg>
+                  Edit history
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
         <div className={styles.msgMeta}>
           <span className={styles.msgName} style={{ color, cursor: 'pointer' }} onClick={e => onUserClick(e, msg.beam_identity)}>
             {msg.beam_identity.split('»')[0] || msg.beam_identity}
           </span>
           <span className={styles.msgTime}>{formatTime(msg.created_at)}</span>
-          {msg.edited_at && <span className={styles.edited}>(edited)</span>}
+          {msg.edited_at && !isEditing && (
+            <button className={styles.editedBtn} onClick={onHistoryToggle} title="View edit history">
+              (edited)
+            </button>
+          )}
+          {historyState?.open && histEntries.length > 0 && !isEditing && (
+            <span className={styles.historyNav}>
+              <button
+                className={styles.historyArrow}
+                onClick={() => onHistoryNav(-1)}
+                disabled={histIdx === 0}
+                title="Older version"
+              >‹</button>
+              <span className={styles.historyLabel}>
+                {histIdx < histEntries.length
+                  ? `v${histIdx + 1}/${totalVersions}`
+                  : 'current'}
+              </span>
+              <button
+                className={styles.historyArrow}
+                onClick={() => onHistoryNav(1)}
+                disabled={histIdx === histEntries.length}
+                title="Newer version"
+              >›</button>
+            </span>
+          )}
+          {historyState?.open && histEntries.length === 0 && !isEditing && (
+            <span className={styles.historyLabel} style={{ marginLeft: 4 }}>no history</span>
+          )}
         </div>
-        {msg.content && (
-          isGifUrl(msg.content)
-            ? <InlineImage src={msg.content} alt="GIF" />
-            : <MarkdownContent content={msg.content} />
+
+        {isEditing ? (
+          <div className={styles.editRow}>
+            <input
+              ref={editInputRef}
+              className={styles.editInput}
+              value={editValue}
+              onChange={e => onEditChange(e.target.value)}
+              onKeyDown={onEditKeyDown}
+              autoComplete="off"
+            />
+            <span className={styles.editHint}>
+              <kbd>Enter</kbd> to save · <kbd>Esc</kbd> to cancel
+              {isMyMsg && <span> · editing your message</span>}
+            </span>
+          </div>
+        ) : viewingHistory ? (
+          <div className={styles.historyContent}>
+            <MarkdownContent content={histEntries[histIdx].content} />
+            <span className={styles.historyTimestamp}>
+              {new Date(histEntries[histIdx].edited_at * 1000).toLocaleString()}
+            </span>
+          </div>
+        ) : (
+          msg.content && (
+            isGifUrl(msg.content)
+              ? <InlineImage src={msg.content} alt="GIF" />
+              : <MarkdownContent content={msg.content} />
+          )
         )}
-        {msg.attachments && msg.attachments.length > 0 && (
+
+        {!isEditing && !viewingHistory && msg.attachments && msg.attachments.length > 0 && (
           <div className={styles.attachments}>
             {msg.attachments.map(att => <AttachmentView key={String(att.id)} att={att} />)}
           </div>
@@ -125,6 +260,17 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
   const [emojiPickerTheme, setEmojiPickerTheme] = useState(() => getEmojiPickerTheme());
   const [gifOpen, setGifOpen] = useState(false);
   const [userPopup, setUserPopup] = useState<{ user: UserPopupInfo; pos: UserPopupPos } | null>(null);
+
+  // Edit mode state
+  const [editingMsgId, setEditingMsgId] = useState<string | number | null>(null);
+  const [editInput, setEditInput] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // History viewer state: msgId → HistoryState
+  const [historyMap, setHistoryMap] = useState<Record<string | number, HistoryState>>({});
+
+  const myIdentity = getBeamIdentity();
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -160,6 +306,13 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [gifOpen]);
+
+  // Focus edit input when edit mode starts
+  useEffect(() => {
+    if (editingMsgId !== null) {
+      setTimeout(() => editInputRef.current?.focus(), 30);
+    }
+  }, [editingMsgId]);
 
   function handleGifSelect(gifUrl: string) {
     setGifOpen(false);
@@ -216,6 +369,73 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
     setInput('');
   }
 
+  // ── Edit mode ─────────────────────────────────────────────────────────────
+
+  function startEdit(msg: ApiMessage & { _optimistic?: boolean }) {
+    if (msg._optimistic) return;
+    setEditingMsgId(msg.id);
+    setEditInput(msg.content);
+  }
+
+  function cancelEdit() {
+    setEditingMsgId(null);
+    setEditInput('');
+    inputRef.current?.focus();
+  }
+
+  async function submitEdit() {
+    if (!editingMsgId || !editInput.trim()) { cancelEdit(); return; }
+    const ok = await editMessage(editingMsgId, editInput.trim());
+    if (ok) cancelEdit();
+  }
+
+  function handleEditKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') { cancelEdit(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); submitEdit(); }
+  }
+
+  // ── Up arrow hotkey ───────────────────────────────────────────────────────
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') { handleSend(); return; }
+    if (e.key === 'ArrowUp' && !input) {
+      const lastOwn = [...messages].reverse().find(
+        m => m.beam_identity === myIdentity && !(m as ApiMessage & { _optimistic?: boolean })._optimistic
+      );
+      if (lastOwn) {
+        e.preventDefault();
+        startEdit(lastOwn);
+      }
+    }
+  }
+
+  // ── History viewer ────────────────────────────────────────────────────────
+
+  async function handleHistoryToggle(msgId: string | number) {
+    const existing = historyMap[msgId];
+    if (!existing) {
+      const entries = await fetchMessageHistory(msgId);
+      setHistoryMap(prev => ({
+        ...prev,
+        [msgId]: { entries, viewIdx: entries.length, open: true },
+      }));
+    } else {
+      setHistoryMap(prev => ({
+        ...prev,
+        [msgId]: { ...existing, open: !existing.open },
+      }));
+    }
+  }
+
+  function handleHistoryNav(msgId: string | number, dir: -1 | 1) {
+    setHistoryMap(prev => {
+      const h = prev[msgId];
+      if (!h) return prev;
+      const newIdx = Math.max(0, Math.min(h.entries.length, h.viewIdx + dir));
+      return { ...prev, [msgId]: { ...h, viewIdx: newIdx } };
+    });
+  }
+
   const canSend = !!channelId && (input.trim().length > 0 || pendingFiles.some(f => !f.uploading && f.id != null));
 
   function handleUserClick(e: React.MouseEvent, name: string) {
@@ -246,7 +466,22 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
         {loading && <div className={styles.empty}>Loading messages…</div>}
         {!loading && messages.length === 0 && <div className={styles.empty}>No messages yet in #{channelName}.</div>}
         {!loading && messages.map(msg => (
-          <MessageRow key={msg.id} msg={msg} onUserClick={handleUserClick} roleMap={roleMap} />
+          <MessageRow
+            key={msg.id}
+            msg={msg}
+            onUserClick={handleUserClick}
+            roleMap={roleMap}
+            isMyMsg={msg.beam_identity === myIdentity}
+            isEditing={editingMsgId !== null && String(editingMsgId) === String(msg.id)}
+            editValue={editInput}
+            editInputRef={editInputRef}
+            onEditChange={setEditInput}
+            onEditKeyDown={handleEditKeyDown}
+            onStartEdit={() => startEdit(msg)}
+            historyState={historyMap[msg.id]}
+            onHistoryToggle={() => handleHistoryToggle(msg.id)}
+            onHistoryNav={dir => handleHistoryNav(msg.id, dir)}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -298,7 +533,7 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
           <input ref={inputRef} type="text" className={styles.chatInput}
             placeholder={channelId ? `Message #${channelName}` : 'Select a channel'}
             value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            onKeyDown={handleInputKeyDown}
             autoComplete="off" disabled={!channelId} />
           <button ref={emojiBtnRef} className={`${styles.actBtn} ${emojiOpen ? styles.actBtnActive : ''}`}
             onClick={() => { setEmojiOpen(o => !o); setGifOpen(false); }} disabled={!channelId} title="Emoji">

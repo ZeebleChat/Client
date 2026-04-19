@@ -13,7 +13,16 @@ export const isAuthenticated = (): boolean =>
   !!(localStorage.getItem('token') && localStorage.getItem('beam_identity'));
 
 export const forceLogout = (): void => {
-  localStorage.clear();
+  const preserve = new Set(
+    Object.keys(localStorage).filter(k =>
+      !k.startsWith('token') &&
+      !k.startsWith('beam_identity') &&
+      !k.startsWith('refresh_token') &&
+      !k.startsWith('uid') &&
+      !k.startsWith('chat_token:')
+    )
+  );
+  Object.keys(localStorage).forEach(k => { if (!preserve.has(k)) localStorage.removeItem(k); });
   window.dispatchEvent(new CustomEvent('zeeble-logout'));
 };
 

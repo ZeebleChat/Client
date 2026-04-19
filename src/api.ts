@@ -26,38 +26,42 @@ function unwrapArray<T>(data: unknown, key: string): T[] {
 
 // ── Token refresh ─────────────────────────────────────────────────────────────
 
-let refreshInProgress = false;
-let refreshPromise: Promise<boolean> | null = null;
 
-async function refreshAccessToken(): Promise<boolean> {
-  if (refreshInProgress && refreshPromise) return refreshPromise;
+type RefreshResult = 'refreshed' | 'auth_error' | 'network_error';
+
+let refreshInProgressTyped = false;
+let refreshPromiseTyped: Promise<RefreshResult> | null = null;
+
+async function refreshAccessToken(): Promise<RefreshResult> {
+  if (refreshInProgressTyped && refreshPromiseTyped) return refreshPromiseTyped;
   const refreshToken = getRefreshToken();
   const uid = getUid();
-  if (!refreshToken || !uid) return false;
+  if (!refreshToken || !uid) return 'auth_error';
 
-  refreshInProgress = true;
-  refreshPromise = (async () => {
+  refreshInProgressTyped = true;
+  refreshPromiseTyped = (async () => {
     try {
       const res = await fetch(`${getAuthUrl()}/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refreshToken, uid }),
       });
-      if (!res.ok) return false;
+      if (res.status === 401 || res.status === 403) return 'auth_error';
+      if (!res.ok) return 'network_error';
       const data = await res.json();
       if (data.token) {
         saveSession(data);
-        return true;
+        return 'refreshed';
       }
-      return false;
+      return 'auth_error';
     } catch {
-      return false;
+      return 'network_error';
     } finally {
-      refreshInProgress = false;
-      refreshPromise = null;
+      refreshInProgressTyped = false;
+      refreshPromiseTyped = null;
     }
   })();
-  return refreshPromise;
+  return refreshPromiseTyped;
 }
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -87,8 +91,8 @@ export async function authedFetch(url: string, opts: RequestInit = {}): Promise<
   const res = await fetch(url, { ...opts, headers });
 
   if (res.status === 401) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
+    const refreshResult = await refreshAccessToken();
+    if (refreshResult === 'refreshed') {
       let retryToken = getToken();
       if (url.startsWith(chatBasePrefix)) {
         await exchangeToken(chatBase);
@@ -97,7 +101,7 @@ export async function authedFetch(url: string, opts: RequestInit = {}): Promise<
       }
       return fetch(url, { ...opts, headers: { ...headers, Authorization: `Bearer ${retryToken}` } });
     }
-    forceLogout();
+    if (refreshResult === 'auth_error') forceLogout();
   }
 
   return res;
@@ -371,6 +375,35 @@ function normalizeFlatMembers(members: unknown[]): ApiMemberGroup[] {
     return result;
   }
   return [];
+}
+
+// ── Message editing ───────────────────────────────────────────────────────────
+
+export interface ApiEditHistoryEntry {
+  content: string;
+  edited_by: string;
+  edited_at: number;
+}
+
+export async function editMessage(messageId: string | number, content: string): Promise<boolean> {
+  try {
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/messages/${encodeURIComponent(String(messageId))}`,
+      { method: 'PATCH', body: JSON.stringify({ content }) }
+    );
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function fetchMessageHistory(messageId: string | number): Promise<ApiEditHistoryEntry[]> {
+  try {
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/messages/${encodeURIComponent(String(messageId))}/history`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return unwrapArray<ApiEditHistoryEntry>(data, 'history');
+  } catch { return []; }
 }
 
 // ── Server management ─────────────────────────────────────────────────────────
@@ -924,6 +957,12 @@ export async function sendDM(toBeam: string, content: string): Promise<{ ok: boo
 
 // ── Account info ───────────────────────────────────────────────────────────────
 
+export interface ParentalControls {
+  can_join_servers: boolean;
+  can_leave_servers: boolean;
+  can_dm: boolean;
+}
+
 export interface ApiSubAccount {
   id: string;
   beam_identity: string;
@@ -931,12 +970,14 @@ export interface ApiSubAccount {
   account_type: string;
   locked?: boolean;
   bot_token?: string;
+  parental_controls?: ParentalControls;
 }
 
 export interface ApiAccountInfo {
   beam_identity: string;
   display_name?: string;
   account_type?: string;
+  premium?: boolean;
   verified?: boolean;
   avatar_attachment_id?: string | null;
   auth_methods?: string[];
@@ -1144,7 +1185,7 @@ async function childAction(childId: string, action: unknown): Promise<{ ok: bool
     const res = await fetch(`${getAuthUrl()}/account/child/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ parent_token: getToken(), child_id: childId, action }),
+      body: JSON.stringify({ parent_token: getToken(), sub_id: childId, action }),
     });
     if (!res.ok) {
       const d = await safeJson(res);
@@ -1158,6 +1199,8 @@ export const lockSubAccount = (id: string) => childAction(id, { lock: null });
 export const unlockSubAccount = (id: string) => childAction(id, { unlock: null });
 export const setSubAccountPassword = (id: string, newPassword: string) =>
   childAction(id, { reset_password: { new_password: newPassword } });
+export const setChildParentalControls = (id: string, controls: ParentalControls) =>
+  childAction(id, { set_parental_controls: { controls } });
 
 export async function regenBotKey(botId: string): Promise<{ ok: boolean; new_token?: string; error?: string }> {
   try {
@@ -1298,6 +1341,22 @@ export async function confirmSubscriptionPayment(
   } catch { return { ok: false, error: 'Network error' }; }
 }
 
+export async function redeemPromoCode(code: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/promo/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      const err = data.error;
+      return { ok: false, error: typeof err === 'string' ? err : 'Invalid or expired promo code.' };
+    }
+    return { ok: true, message: typeof data.message === 'string' ? data.message : 'Promo code redeemed!' };
+  } catch { return { ok: false, error: 'Network error' }; }
+}
+
 // ── Health / validation ───────────────────────────────────────────────────────
 
 export async function checkAuthHealth(): Promise<boolean> {
@@ -1317,7 +1376,8 @@ export async function validateToken(): Promise<'valid' | 'invalid' | 'network_er
       body: JSON.stringify({ token }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return 'invalid';
+    if (res.status === 401 || res.status === 403) return 'invalid';
+    if (!res.ok) return 'network_error';
     const data = await safeJson(res);
     return data.valid === true ? 'valid' : 'invalid';
   } catch {
@@ -1331,4 +1391,267 @@ export async function checkServerHealth(serverUrl: string): Promise<boolean> {
     const res = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(5000) });
     return res.ok;
   } catch { return false; }
+}
+
+// ── Admin / Staff Portal API ──────────────────────────────────────────────────
+// All calls send the JWT in the Authorization header.
+// The backend verifies the signature and checks identity from the token claims —
+// never from anything passed in the request body.
+
+function adminHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${getToken()}`,
+  };
+}
+
+export interface AdminMe {
+  identity: string;
+  uid: string;
+  role: 'owner' | 'staff';
+  is_owner: boolean;
+}
+
+export async function adminGetMe(): Promise<AdminMe | null> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/me`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    return safeJson<AdminMe>(res);
+  } catch { return null; }
+}
+
+export interface AdminStats {
+  total_users: number;
+  premium_users: number;
+  total_servers: number;
+  active_bans: number;
+  staff_count: number;
+}
+
+export async function adminGetStats(): Promise<AdminStats | null> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/stats`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    return safeJson<AdminStats>(res);
+  } catch { return null; }
+}
+
+export interface AdminUser {
+  id: string;
+  beam_identity: string;
+  display_name: string;
+  beam_tag: string;
+  premium: boolean;
+  verified: boolean;
+  locked: boolean;
+  is_staff: boolean;
+  staff_role: string | null;
+  created_at: string;
+}
+
+export async function adminListUsers(page = 0, search?: string): Promise<AdminUser[]> {
+  try {
+    const params = new URLSearchParams({ page: String(page) });
+    if (search) params.set('search', search);
+    const res = await fetch(`${getAuthUrl()}/admin/users?${params}`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ users: AdminUser[] }>(res);
+    return data.users ?? [];
+  } catch { return []; }
+}
+
+export async function adminLockUser(uid: string, reason: string, expiresAt?: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/users/${uid}/lock`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ reason, expires_at: expiresAt ?? null }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function adminUnlockUser(uid: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/users/${uid}/unlock`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export interface StaffMember {
+  id: string;
+  beam_identity: string;
+  display_name: string;
+  staff_role: string;
+  staff_note: string | null;
+  staff_added_at: string | null;
+  avatar_attachment_id: number | null;
+}
+
+export async function adminListStaff(): Promise<StaffMember[]> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/staff`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ staff: StaffMember[] }>(res);
+    return data.staff ?? [];
+  } catch { return []; }
+}
+
+export async function adminAddStaff(uid: string, staffRole: string, staffNote?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/staff`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ uid, staff_role: staffRole, staff_note: staffNote }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function adminRemoveStaff(uid: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/staff/${uid}`, {
+      method: 'DELETE',
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export interface AdminPromo {
+  code: string;
+  uses_max: number | null;
+  uses_count: number;
+  expires_at: number | null;
+  grants_premium: boolean;
+  created_by: string | null;
+}
+
+export async function adminListPromos(): Promise<AdminPromo[]> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/promos`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ promos: AdminPromo[] }>(res);
+    return data.promos ?? [];
+  } catch { return []; }
+}
+
+export async function adminCreatePromo(
+  code: string, usesMax: number | null, expiresAt: number | null, grantsPremium: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/promos`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ code, uses_max: usesMax, expires_at: expiresAt, grants_premium: grantsPremium }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await safeJson<{ ok?: boolean; error?: string }>(res);
+    return { ok: res.ok, error: data.error };
+  } catch { return { ok: false, error: 'Network error' }; }
+}
+
+export async function adminDeletePromo(code: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/promos/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export interface AdminBan {
+  id: number;
+  user_id: string;
+  beam_identity: string;
+  reason: string;
+  banned_by: string;
+  expires_at: number | null;
+  created_at: string;
+}
+
+export async function adminListBans(): Promise<AdminBan[]> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/bans`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ bans: AdminBan[] }>(res);
+    return data.bans ?? [];
+  } catch { return []; }
+}
+
+export interface AdminBroadcast {
+  id: number;
+  message: string;
+  sent_by: string;
+  sent_at: string;
+  target: string;
+}
+
+export async function adminListBroadcasts(): Promise<AdminBroadcast[]> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/broadcasts`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ broadcasts: AdminBroadcast[] }>(res);
+    return data.broadcasts ?? [];
+  } catch { return []; }
+}
+
+export async function adminSendBroadcast(message: string, target = 'all'): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/broadcasts`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ message, target }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export interface AdminServer {
+  server_url: string;
+  owner: string;
+  member_count: number;
+}
+
+export async function adminListServers(): Promise<AdminServer[]> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/servers`, {
+      headers: adminHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await safeJson<{ servers: AdminServer[] }>(res);
+    return data.servers ?? [];
+  } catch { return []; }
 }

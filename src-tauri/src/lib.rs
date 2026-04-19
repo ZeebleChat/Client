@@ -206,10 +206,27 @@ fn stop_screen_capture(state: State<CaptureState>) {
 
 // ── App entry point ───────────────────────────────────────────────────────────
 
+async fn check_for_updates(app: tauri::AppHandle) {
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    use tauri_plugin_updater::UpdaterExt;
+    match app.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => {
+                let _ = app.emit("update-available", update.version.to_string());
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("Update check failed: {e}"),
+        },
+        Err(e) => eprintln!("Updater init failed: {e}"),
+    }
+}
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::<Option<CaptureHandle>>::new(None))
         .invoke_handler(tauri::generate_handler![
             get_capture_sources,
@@ -217,6 +234,11 @@ pub fn run() {
             stop_screen_capture,
         ])
         .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                check_for_updates(handle).await;
+            });
+
             #[allow(unused_mut)]
             let mut builder = tauri::WebviewWindowBuilder::new(
                 app,

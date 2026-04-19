@@ -28,6 +28,7 @@ import {
   lockSubAccount,
   unlockSubAccount,
   setSubAccountPassword,
+  setChildParentalControls,
   regenBotKey,
   setupTotp,
   enableTotp,
@@ -36,11 +37,13 @@ import {
   getRecoveryCodesStatus,
   createSubscription,
   confirmSubscriptionPayment,
+  redeemPromoCode,
   type ApiFriend,
   type ApiFriendRequest,
   type ApiAccountInfo,
   type ApiSubAccount,
   type ApiServer,
+  type ParentalControls,
 } from '../api';
 
 const stripePromise = loadStripe('pk_live_51TDqoL3D524x7zwNWBF2QWsFCixoCww15vFqIvCX6nGv0NIMw51zgM3OakA7sop5Jw6LQ3XDP8GYBftKPQc21C0500U3iLuR2O');
@@ -56,9 +59,10 @@ interface Props {
   onLogout: () => void;
   onDm?: (beamIdentity: string) => void;
   onSwitchServer?: (url: string, name: string) => void;
+  onOpenDevPanel?: () => void;
 }
 
-type Tab = 'profile' | 'security' | 'friends' | 'servers' | 'subaccounts' | 'premium' | 'appearance' | 'notifications' | 'accessibility' | 'voice' | 'dev';
+type Tab = 'profile' | 'security' | 'friends' | 'servers' | 'subaccounts' | 'promo' | 'premium' | 'appearance' | 'notifications' | 'accessibility' | 'voice' | 'dev';
 
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 
@@ -1006,13 +1010,24 @@ const SA_TYPE_COLORS: Record<string, string> = { Child: 'var(--accent)', Alt: 'v
 
 type SaEntry = ApiSubAccount & { typeLabel: string };
 
+const DEFAULT_PC: ParentalControls = { can_join_servers: true, can_leave_servers: true, can_dm: true };
+
 function SubAccountRow({ acc, onRefresh }: { acc: SaEntry; onRefresh: () => void }) {
   const isBot = acc.typeLabel === 'Bot';
+  const isChild = acc.typeLabel === 'Child';
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
   const [pwFeedback, setPwFeedback] = useState('');
   const [botToken, setBotToken] = useState(acc.bot_token ?? '');
+  const [pc, setPc] = useState<ParentalControls>(acc.parental_controls ?? DEFAULT_PC);
+
+  async function handlePcToggle(key: keyof ParentalControls) {
+    const updated = { ...pc, [key]: !pc[key] };
+    setPc(updated);
+    const r = await setChildParentalControls(acc.id, updated);
+    if (!r.ok) { setPc(pc); alert(r.error ?? 'Failed to update parental controls'); }
+  }
 
   async function run(label: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(label);
@@ -1188,6 +1203,31 @@ function SubAccountRow({ acc, onRefresh }: { acc: SaEntry; onRefresh: () => void
                   </div>
                 )}
               </div>
+
+              {/* Parental controls (child accounts only) */}
+              {isChild && (
+                <div className={styles.fieldGroup} style={{ marginTop: 12 }}>
+                  <label className={styles.fieldLabel}>Parental Controls</label>
+                  {(
+                    [
+                      { key: 'can_join_servers', label: 'Can join servers' },
+                      { key: 'can_leave_servers', label: 'Can leave servers' },
+                      { key: 'can_dm', label: 'Can send DMs' },
+                    ] as { key: keyof ParentalControls; label: string }[]
+                  ).map(({ key, label }) => (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{label}</span>
+                      <button
+                        className={pc[key] ? styles.saManageBtnOk : styles.saManageBtn}
+                        style={{ minWidth: 60, fontSize: 12 }}
+                        onClick={() => handlePcToggle(key)}
+                      >
+                        {pc[key] ? 'Allowed' : 'Blocked'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1297,6 +1337,58 @@ const PREMIUM_PERKS: { label: string; freeVal: string | 'check' | 'included' | n
   },
 ];
 
+// ── PromoTab ──────────────────────────────────────────────────────────────────
+
+function PromoTab() {
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function handleRedeem() {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) return;
+    setLoading(true);
+    setStatus(null);
+    const result = await redeemPromoCode(trimmed);
+    setLoading(false);
+    setStatus({ ok: result.ok, msg: result.ok ? (result.message ?? 'Promo code redeemed!') : (result.error ?? 'Failed to redeem code.') });
+    if (result.ok) setCode('');
+  }
+
+  return (
+    <div className={styles.tabContent}>
+      <p className={styles.sectionTitle}>Redeem Promo Code</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <label className={styles.fieldLabel}>Promo Code</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            className={styles.input}
+            placeholder="Enter your code"
+            value={code}
+            onChange={e => setCode(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && !loading && handleRedeem()}
+            maxLength={32}
+            spellCheck={false}
+          />
+          <button
+            className={styles.saveBtn}
+            onClick={handleRedeem}
+            disabled={loading || !code.trim()}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            {loading ? 'Redeeming…' : 'Redeem'}
+          </button>
+        </div>
+        {status && (
+          <p style={{ fontSize: 13, color: status.ok ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', margin: 0 }}>
+            {status.msg}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── PremiumTab ────────────────────────────────────────────────────────────────
 
 type PayStep = 'plans' | 'card' | 'success';
@@ -1316,8 +1408,7 @@ function PremiumTab() {
 
   useEffect(() => { getAccountInfo().then(setInfo); }, []);
 
-  const isPremium = (info as unknown as Record<string, unknown>)?.is_premium === true ||
-    info?.account_type === 'premium';
+  const isPremium = info?.premium === true;
 
   // Mount the Stripe card element when the card step is shown
   useEffect(() => {
@@ -1488,19 +1579,36 @@ function PremiumTab() {
     </div>
   );
 
+  const isActive = isPremium || step === 'success';
+
   const banner = (
-    <div className={`${styles.premiumBanner} ${isPremium || step === 'success' ? styles.premiumBannerActive : ''}`}>
+    <div className={`${styles.premiumBanner} ${isActive ? styles.premiumBannerActive : ''}`}>
       <div className={styles.premiumBannerIcon}>
         <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
         </svg>
       </div>
       <div className={styles.premiumBannerText}>
-        <div className={styles.premiumBannerTitle}>
-          {isPremium || step === 'success' ? 'Zeeble Premium' : 'Upgrade to Premium'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className={styles.premiumBannerTitle}>
+            {isActive ? 'Zeeble Premium' : 'Upgrade to Premium'}
+          </div>
+          {isActive && (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.6px',
+              textTransform: 'uppercase',
+              background: 'rgba(74, 222, 128, 0.18)',
+              color: '#4ade80',
+              border: '1px solid rgba(74, 222, 128, 0.35)',
+              borderRadius: 4,
+              padding: '2px 7px',
+            }}>Active</span>
+          )}
         </div>
         <div className={styles.premiumBannerSub}>
-          {isPremium || step === 'success'
+          {isActive
             ? 'You have an active Premium subscription.'
             : 'Unlock exclusive features and support Zeeble.'}
         </div>
@@ -1515,7 +1623,7 @@ function PremiumTab() {
       {/* ── Already premium ── */}
       {isPremium ? (
         <>
-          <div className={styles.sectionTitle} style={{ marginTop: 20 }}>What you get</div>
+          <div className={styles.sectionTitle} style={{ marginTop: 4 }}>Your benefits</div>
           {perksList}
         </>
 
@@ -1931,7 +2039,7 @@ function AccessibilityTab() {
 
 // ── Dev tab ────────────────────────────────────────────────────────────────────
 
-function DevTab() {
+function DevTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
   const [authUrl, setAuthUrl] = useState(
     localStorage.getItem('auth_server_url') || ENV_AUTH_URL
   );
@@ -2001,6 +2109,22 @@ function DevTab() {
           {token || '(no token)'}
         </div>
       </div>
+
+      {onOpenDevPanel && (
+        <>
+          <div className={styles.sectionTitle} style={{ marginTop: 20 }}>Staff Portal</div>
+          <button
+            className={styles.saveBtn}
+            onClick={onOpenDevPanel}
+            style={{ marginTop: 0 }}
+          >
+            Open Dev Panel
+          </button>
+          <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, lineHeight: 1.4 }}>
+            Access is verified server-side via your signed JWT. Requires owner or staff role.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -2288,6 +2412,19 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
     ),
   },
   {
+    id: 'promo',
+    label: 'Redeem Code',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M20 12V22H4V12"/>
+        <path d="M22 7H2v5h20V7z"/>
+        <path d="M12 22V7"/>
+        <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+        <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+      </svg>
+    ),
+  },
+  {
     id: 'premium',
     label: 'Premium',
     gold: true,
@@ -2354,7 +2491,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
   },
 ];
 
-export default function AccountModal({ onClose, onLogout, onDm, onSwitchServer }: Props) {
+export default function AccountModal({ onClose, onLogout, onDm, onSwitchServer, onOpenDevPanel }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('profile');
   const identity = getBeamIdentity();
   const [navAvatarId, setNavAvatarId] = useState<string | null>(
@@ -2428,12 +2565,13 @@ export default function AccountModal({ onClose, onLogout, onDm, onSwitchServer }
             {activeTab === 'friends'     && <FriendsTab onDm={onDm ? b => { onDm(b); onClose(); } : undefined} />}
             {activeTab === 'servers'     && <ServersTab onSwitchServer={onSwitchServer ? (u, n) => { onSwitchServer(u, n); onClose(); } : undefined} />}
             {activeTab === 'subaccounts' && <SubaccountsTab />}
+            {activeTab === 'promo'       && <PromoTab />}
             {activeTab === 'premium'     && <PremiumTab />}
             {activeTab === 'appearance'     && <AppearanceTab />}
             {activeTab === 'notifications'  && <NotificationsTab />}
             {activeTab === 'accessibility'  && <AccessibilityTab />}
             {activeTab === 'voice'          && <VoiceTab />}
-            {activeTab === 'dev'            && <DevTab />}
+            {activeTab === 'dev'            && <DevTab onOpenDevPanel={onOpenDevPanel} />}
           </div>
         </div>
       </div>
