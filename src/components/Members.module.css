@@ -97,3 +97,9 @@
   text-overflow: ellipsis;
 }
 
+@media (max-width: 767px) {
+  .members {
+    display: none;
+  }
+}
+

@@ -23,11 +23,11 @@ const cleaned = raw.trim();
 try {
 const url = new URL(cleaned);
 if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-const m = url.pathname.match(/\/(?:join|invites)\/([^/]+)/i);
+const m = url.pathname.match(/^(.*?)\/(?:join|invites)\/([^/]+)$/i);
 if (!m) return null;
-const code = m[1].toLowerCase().replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, '');
+const code = m[2].toLowerCase().replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, '');
 if (!code) return null;
-return { serverUrl: url.origin, code };
+return { serverUrl: url.origin + m[1], code };
 } catch {
 return null;
 }

@@ -35,6 +35,12 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/zb-cloud/, ''),
       },
+      '/zb-market': {
+        target: 'https://market.zeeble.xyz',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/zb-market/, ''),
+      },
     },
   },
 

@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+/* ── Pixel font — force onto every element so component stylesheets can't win ── */
+*, *::before, *::after {
+  font-family: 'Press Start 2P', monospace !important;
+}
+
+:root {
+  --font-ui:   'Press Start 2P', monospace;
+  --font-body: 'Press Start 2P', monospace;
+  --font-code: 'Press Start 2P', monospace;
+}
+
+body {
+  font-size: 10px;
+  line-height: 1.9;
+  letter-spacing: 0.03em;
+}
+
+/* Inputs and textareas inherit from * but need explicit size tweak */
+input, textarea, select, button {
+  font-size: 10px !important;
+  line-height: 1.9 !important;
+}
+
+/* ── Scanlines overlay ──────────────────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99999;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.18) 2px,
+    rgba(0, 0, 0, 0.18) 4px
+  );
+}
+
+/* ── Phosphor glow on text ──────────────────────────────────────────────────── */
+body {
+  text-shadow: 0 0 4px rgba(0, 255, 65, 0.35);
+}
+
+h1, h2, h3, h4,
+[class*="active"],
+[class*="selected"] {
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.6);
+}
+
+/* ── CRT screen vignette ────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99998;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 60%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}

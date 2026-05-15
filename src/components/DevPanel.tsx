@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { getAuthAttachmentUrl } from '../api';
 import {
   adminGetMe, adminGetStats, adminListUsers, adminLockUser, adminUnlockUser,
-  adminListStaff, adminAddStaff, adminRemoveStaff,
+  adminSuspendUser, adminListStaff, adminAddStaff, adminRemoveStaff,
   adminListPromos, adminCreatePromo, adminDeletePromo,
-  adminListBans, adminListBroadcasts, adminSendBroadcast, adminListServers,
+  adminListBans, adminListBroadcasts, adminSendBroadcast, adminListServers, adminDeleteServer,
   type AdminMe, type AdminStats, type AdminUser, type StaffMember,
   type AdminPromo, type AdminBan, type AdminBroadcast, type AdminServer,
 } from '../api';
@@ -333,17 +333,28 @@ function UsersTab() {
                     ? <span className={styles.badgeMod}>staff</span>
                     : <span className={styles.badgeStaff}>active</span>}
                 </td>
-                <td>
+                <td className={styles.actionCell}>
                   {u.locked
                     ? <button className={styles.actionBtnSm} onClick={async () => {
                         await adminUnlockUser(u.id);
                         await load(page, search);
                       }}>Unban</button>
-                    : <button className={styles.removeBtnSm} onClick={async () => {
-                        const reason = prompt('Ban reason:') ?? 'No reason';
-                        await adminLockUser(u.id, reason);
-                        await load(page, search);
-                      }}>Ban</button>
+                    : <>
+                        <button className={styles.suspendBtnSm} onClick={async () => {
+                          const daysStr = prompt('Suspend for how many days? (e.g. 7):', '7');
+                          if (daysStr === null) return;
+                          const days = parseInt(daysStr, 10);
+                          if (!days || days < 1) return;
+                          const reason = prompt('Suspension reason:') ?? 'No reason';
+                          await adminSuspendUser(u.id, reason, days);
+                          await load(page, search);
+                        }}>Suspend</button>
+                        <button className={styles.removeBtnSm} onClick={async () => {
+                          const reason = prompt('Lock reason (permanent):') ?? 'No reason';
+                          await adminLockUser(u.id, reason);
+                          await load(page, search);
+                        }}>Lock</button>
+                      </>
                   }
                 </td>
               </tr>
@@ -365,23 +376,48 @@ function UsersTab() {
 function ServersTab() {
   const [servers, setServers] = useState<AdminServer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
+    setLoading(true);
     adminListServers().then(s => { setServers(s); setLoading(false); });
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleDelete(serverUrl: string) {
+    const confirmed = window.confirm(
+      `Delete server?\n\n${serverUrl}\n\nThis removes it from the registry. Cloud server data will also be purged.`
+    );
+    if (!confirmed) return;
+    setDeleting(serverUrl);
+    await adminDeleteServer(serverUrl);
+    setDeleting(null);
+    await load();
+  }
 
   return (
     <div className={styles.tabContent}>
       <div className={styles.sectionTitle}>Registered servers ({servers.length})</div>
       {loading ? <div className={styles.loading}>Loading…</div> : (
         <table className={styles.table}>
-          <thead><tr><th>URL</th><th>Owner</th><th>Members</th></tr></thead>
+          <thead><tr><th>URL</th><th>Owner</th><th>Members</th><th></th></tr></thead>
           <tbody>
             {servers.map(s => (
               <tr key={s.server_url}>
                 <td><code className={styles.codeSmall}>{s.server_url}</code></td>
                 <td>{s.owner}</td>
                 <td>{s.member_count}</td>
+                <td>
+                  <button
+                    className={styles.removeBtn}
+                    disabled={deleting === s.server_url}
+                    onClick={() => handleDelete(s.server_url)}
+                    title="Delete server"
+                  >
+                    {deleting === s.server_url ? '…' : '✕'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

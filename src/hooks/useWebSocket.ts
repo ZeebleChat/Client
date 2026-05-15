@@ -14,15 +14,27 @@ export type WsEvent =
   | { type: 'member'; groups: ApiMemberGroup[] }
   | { type: 'channel_created'; channel: ApiChannel }
   | { type: 'channel_deleted'; channel_id: string | number }
-  | { type: 'channel_renamed'; channel: ApiChannel };
+  | { type: 'channel_renamed'; channel: ApiChannel }
+  | { type: 'voice_state'; channel_id: string; identity: string; action: 'join' | 'leave' }
+  | { type: 'voice_joined'; channel_id: string }
+  | { type: 'stream_start'; channel_id: string; broadcaster: string }
+  | { type: 'stream_end'; channel_id: string }
+  | { type: 'stream_started'; channel_id: string }
+  | { type: 'stream_joined'; channel_id: string; broadcaster: string };
 
 interface UseWebSocketOptions {
   serverUrl: string;
   channelId: string | number | null;
   onEvent: (event: WsEvent) => void;
+  /** Called directly (bypassing React state) for every incoming voice_audio frame. */
+  onVoiceAudio?: (from: string, channelId: string, data: string) => void;
+  /** Called directly (bypassing React state) for every incoming stream_audio frame. */
+  onStreamAudio?: (channelId: string, data: string) => void;
+  /** Called directly (bypassing React state) for every incoming stream_frame (screen share JPEG). */
+  onScreenFrame?: (from: string, channelId: string, data: string) => void;
 }
 
-export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOptions) {
+export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onStreamAudio, onScreenFrame }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(3000);
@@ -30,9 +42,15 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
   const shouldReconnect = useRef(true);
   const connGenRef = useRef(0);
   const onEventRef = useRef(onEvent);
+  const onVoiceAudioRef = useRef(onVoiceAudio);
+  const onStreamAudioRef = useRef(onStreamAudio);
+  const onScreenFrameRef = useRef(onScreenFrame);
   const channelIdRef = useRef(channelId);
 
   onEventRef.current = onEvent;
+  onVoiceAudioRef.current = onVoiceAudio;
+  onStreamAudioRef.current = onStreamAudio;
+  onScreenFrameRef.current = onScreenFrame;
   channelIdRef.current = channelId;
 
   const send = useCallback((obj: Record<string, unknown>) => {
@@ -94,6 +112,53 @@ export function useWebSocket({ serverUrl, channelId, onEvent }: UseWebSocketOpti
       catch { return; }
 
       if (msg.type === 'pong' || msg.type === 'activated') return;
+
+      // voice_audio is high-frequency — bypass React state entirely.
+      if (msg.type === 'voice_audio') {
+        onVoiceAudioRef.current?.(msg.from as string, msg.channel_id as string, msg.data as string);
+        return;
+      }
+
+      // stream_audio is high-frequency — bypass React state entirely.
+      if (msg.type === 'stream_audio') {
+        onStreamAudioRef.current?.(msg.channel_id as string, msg.data as string);
+        return;
+      }
+
+      // stream_frame (screen share JPEG) is high-frequency — bypass React state entirely.
+      if (msg.type === 'stream_frame') {
+        onScreenFrameRef.current?.(msg.from as string, msg.channel_id as string, msg.data as string);
+        return;
+      }
+
+      if (msg.type === 'voice_joined') return;
+
+      if (msg.type === 'stream_started') {
+        onEventRef.current({ type: 'stream_started', channel_id: msg.channel_id as string });
+        return;
+      }
+      if (msg.type === 'stream_joined') {
+        onEventRef.current({ type: 'stream_joined', channel_id: msg.channel_id as string, broadcaster: msg.broadcaster as string });
+        return;
+      }
+      if (msg.type === 'stream_start') {
+        onEventRef.current({ type: 'stream_start', channel_id: msg.channel_id as string, broadcaster: msg.broadcaster as string });
+        return;
+      }
+      if (msg.type === 'stream_end') {
+        onEventRef.current({ type: 'stream_end', channel_id: msg.channel_id as string });
+        return;
+      }
+
+      if (msg.type === 'voice_state') {
+        onEventRef.current({
+          type: 'voice_state',
+          channel_id: msg.channel_id as string,
+          identity: msg.identity as string,
+          action: msg.action as 'join' | 'leave',
+        });
+        return;
+      }
 
       if (msg.kind === 'message' || msg.type === 'message') {
         onEventRef.current({ type: 'message', msg: msg as unknown as ApiMessage });

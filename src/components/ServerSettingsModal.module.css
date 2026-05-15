@@ -959,3 +959,58 @@
   color: var(--red) !important;
   font-weight: 600;
 }
+
+/* ── Server banner upload ─────────────────────────────────────────────────── */
+
+.bannerPreview {
+  position: relative;
+  width: 100%;
+  height: 100px;
+  border-radius: var(--radius-s);
+  background: var(--bg-main);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.bannerPreviewClickable {
+  cursor: pointer;
+}
+
+.bannerPreviewClickable:hover .bannerOverlay {
+  opacity: 1;
+}
+
+.bannerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+.bannerPlaceholder {
+  font-size: 12px;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.bannerOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  opacity: 0;
+  transition: opacity 0.18s;
+}

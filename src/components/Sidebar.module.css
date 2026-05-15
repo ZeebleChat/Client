@@ -6,6 +6,21 @@
   border-right: 1px solid rgba(0, 0, 0, 0.2);
 }
 
+.banner {
+  width: 100%;
+  height: 80px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.bannerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
 .header {
   height: 64px;
   padding: 0 20px;
@@ -730,4 +745,21 @@
 .settingsErr {
   font-size: 11px;
   color: var(--red);
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 60px;
+    width: 280px;
+    z-index: 45;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .sidebar.mobileOpen {
+    transform: translateX(0);
+  }
 }

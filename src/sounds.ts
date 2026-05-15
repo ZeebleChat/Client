@@ -1,3 +1,32 @@
+// ─── Pack Sound Registry ──────────────────────────────────────────────────────
+
+const _packSounds: Map<string, HTMLAudioElement> = new Map();
+
+export function setPackSounds(sounds: Record<string, string>): void {
+  _packSounds.clear();
+  for (const [key, url] of Object.entries(sounds)) {
+    const audio = new Audio(url);
+    audio.preload = 'auto';
+    _packSounds.set(key, audio);
+  }
+}
+
+export function clearPackSounds(): void {
+  _packSounds.clear();
+}
+
+function packOrFallback(key: string, fallback: () => void): void {
+  const audio = _packSounds.get(key);
+  if (audio) {
+    audio.currentTime = 0;
+    audio.play().catch(() => fallback());
+  } else {
+    fallback();
+  }
+}
+
+// ─── Synthesizer ──────────────────────────────────────────────────────────────
+
 let _ctx: AudioContext | null = null;
 
 function ac(): AudioContext {
@@ -56,67 +85,83 @@ function sweep(
 
 
 export function playStartup() {
-  const t = ac().currentTime;
-  tone(659.25, t,        0.18, 0.2); // E5
-  tone(783.99, t + 0.18, 0.25, 0.2); // G5
+  packOrFallback('voice_connect', () => {
+    const t = ac().currentTime;
+    tone(659.25, t,        0.18, 0.2);
+    tone(783.99, t + 0.18, 0.25, 0.2);
+  });
 }
-
 
 export function playJoin() {
-  const t = ac().currentTime;
-  tone(523.25, t,        0.14, 0.25); // C5
-  tone(659.25, t + 0.14, 0.18, 0.25); // E5
+  packOrFallback('voice_connect', () => {
+    const t = ac().currentTime;
+    tone(523.25, t,        0.14, 0.25);
+    tone(659.25, t + 0.14, 0.18, 0.25);
+  });
 }
-
 
 export function playLeave() {
-  const t = ac().currentTime;
-  tone(659.25, t,        0.14, 0.25); // E5
-  tone(523.25, t + 0.14, 0.18, 0.25); // C5
+  packOrFallback('voice_disconnect', () => {
+    const t = ac().currentTime;
+    tone(659.25, t,        0.14, 0.25);
+    tone(523.25, t + 0.14, 0.18, 0.25);
+  });
 }
-
 
 export function playMute() {
-  tone(220, ac().currentTime, 0.08, 0.25);
+  packOrFallback('mute', () => tone(220, ac().currentTime, 0.08, 0.25));
 }
-
 
 export function playUnmute() {
-  tone(440, ac().currentTime, 0.08, 0.25);
+  packOrFallback('unmute', () => tone(440, ac().currentTime, 0.08, 0.25));
 }
-
 
 export function playDeafen() {
-  sweep(600, 200, ac().currentTime, 0.15, 0.2);
+  packOrFallback('deafen', () => sweep(600, 200, ac().currentTime, 0.15, 0.2));
 }
-
 
 export function playUndeafen() {
-  sweep(200, 600, ac().currentTime, 0.15, 0.2);
+  packOrFallback('deafen', () => sweep(200, 600, ac().currentTime, 0.15, 0.2));
 }
-
 
 export function playLive() {
-  const t = ac().currentTime;
-  tone(523.25, t,        0.10, 0.22); // C5
-  tone(659.25, t + 0.10, 0.10, 0.22); // E5
-  tone(783.99, t + 0.20, 0.14, 0.22); // G5
+  packOrFallback('voice_connect', () => {
+    const t = ac().currentTime;
+    tone(523.25, t,        0.10, 0.22);
+    tone(659.25, t + 0.10, 0.10, 0.22);
+    tone(783.99, t + 0.20, 0.14, 0.22);
+  });
 }
-
 
 export function playUnlive() {
-  const t = ac().currentTime;
-  tone(783.99, t,        0.10, 0.22); // G5
-  tone(659.25, t + 0.10, 0.10, 0.22); // E5
-  tone(523.25, t + 0.20, 0.14, 0.22); // C5
+  packOrFallback('voice_disconnect', () => {
+    const t = ac().currentTime;
+    tone(783.99, t,        0.10, 0.22);
+    tone(659.25, t + 0.10, 0.10, 0.22);
+    tone(523.25, t + 0.20, 0.14, 0.22);
+  });
 }
-
 
 export function playUserJoin() {
-  tone(880, ac().currentTime, 0.2, 0.18);
+  packOrFallback('user_join', () => tone(880, ac().currentTime, 0.2, 0.18));
 }
 
-
 export function playUserLeave() {
-  tone(660, ac().currentTime, 0.2, 0.18);
+  packOrFallback('user_leave', () => tone(660, ac().currentTime, 0.2, 0.18));
+}
+
+export function playMessageSend() {
+  packOrFallback('message_send', () => tone(880, ac().currentTime, 0.06, 0.12));
+}
+
+export function playMessageReceive() {
+  packOrFallback('message_receive', () => tone(660, ac().currentTime, 0.08, 0.15));
+}
+
+export function playNotification() {
+  packOrFallback('notification', () => {
+    const t = ac().currentTime;
+    tone(880, t,        0.08, 0.2);
+    tone(1100, t + 0.1, 0.1,  0.2);
+  });
 }

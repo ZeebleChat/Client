@@ -7,25 +7,82 @@ import UserPopup, { type UserPopupInfo, type UserPopupPos } from './UserPopup';
 import VideoPlayer from './VideoPlayer';
 import Lightbox from './Lightbox';
 import type { ApiMessage, ApiEditHistoryEntry } from '../api';
-import { getRoleColor, uploadFile, getAttachmentUrl, editMessage, fetchMessageHistory } from '../api';
+import { getRoleColor, uploadFile, getAttachmentUrl, editMessage, deleteMessage, fetchMessageHistory } from '../api';
 import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
 import { formatTime } from '../types';
 import styles from './ChatMain.module.css';
+import { searchEmojis, type EmojiEntry } from './emojiData';
+import type { EmojiManifest, EmojiEntry as PackEmojiEntry } from '../resourcePack';
 
 marked.setOptions({ gfm: true, breaks: true });
 
-function renderMarkdown(text: string): string {
-  return DOMPurify.sanitize(marked.parse(text) as string, { USE_PROFILES: { html: true } });
+function injectMentionHighlights(html: string, myName: string): string {
+  const myBase = myName?.split('»')[0]?.trim() ?? '';
+  const parts = html.split(/(<\/?(?:code|pre)[^>]*>)/);
+  let depth = 0;
+  // Match @display name»hash (spaces allowed before ») OR @singleword
+  const mentionRe = /@((?:[^\s»@<]+\s)*[^\s»@<]+»[a-zA-Z0-9]+|[^\s»@<]+)/g;
+  return parts.map(part => {
+    if (/^<(?:code|pre)/.test(part)) { depth++; return part; }
+    if (/^<\/(?:code|pre)/.test(part)) { depth--; return part; }
+    if (depth > 0) return part;
+    return part.replace(mentionRe, (_match, name) => {
+      const base = name.split('»')[0].trim();
+      const cls = base === myBase && myBase ? 'zbl-mention zbl-mention-me' : 'zbl-mention';
+      return `<span class="${cls}">@${name}</span>`;
+    });
+  }).join('');
 }
 
-function MarkdownContent({ content }: { content: string }) {
-  const html = useMemo(() => renderMarkdown(content), [content]);
+function expandPackEmojis(text: string, emojis: PackEmojiEntry[], baseUrl: string): string {
+  if (!emojis.length) return text;
+  const map = new Map(emojis.map(e => [e.shortcode, e]));
+  return text.replace(/:([a-z0-9_+\-]{1,40}):/g, (match, code) => {
+    const entry = map.get(code);
+    if (!entry) return match;
+    const src = baseUrl + entry.file;
+    return `<img src="${src}" alt=":${entry.shortcode}:" class="pack-emoji" title=":${entry.shortcode}:" loading="eager" />`;
+  });
+}
+
+function renderMarkdown(text: string, myIdentity?: string, packEmojis?: PackEmojiEntry[], packBaseUrl?: string): string {
+  const expanded = packEmojis?.length ? expandPackEmojis(text, packEmojis, packBaseUrl!) : text;
+  const md = marked.parse(expanded) as string;
+  const withMentions = myIdentity ? injectMentionHighlights(md, myIdentity) : md;
+  return DOMPurify.sanitize(withMentions, { USE_PROFILES: { html: true } });
+}
+
+function MarkdownContent({ content, myIdentity, packEmojis, packBaseUrl }: {
+  content: string;
+  myIdentity?: string;
+  packEmojis?: PackEmojiEntry[];
+  packBaseUrl?: string;
+}) {
+  const html = useMemo(
+    () => renderMarkdown(content, myIdentity, packEmojis, packBaseUrl),
+    [content, myIdentity, packEmojis, packBaseUrl],
+  );
   return <div className={styles.msgText} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function getEmojiPickerTheme(): Theme {
   return document.documentElement.getAttribute('data-theme') === 'light' ? Theme.LIGHT : Theme.DARK;
+}
+
+function emojiOnlyCount(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  // Strip ZWJ, variation selectors, skin tone modifiers, whitespace
+  const stripped = trimmed.replace(/[\s\u200d\ufe0f\u20e3\u{1f3fb}-\u{1f3ff}]/gu, '');
+  if (!stripped || !/^\p{Extended_Pictographic}+$/u.test(stripped)) return null;
+  try {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const count = [...seg.segment(trimmed)].filter(s => s.segment.trim().length > 0).length;
+    return count;
+  } catch {
+    return 1;
+  }
 }
 
 function isGifUrl(content: string): boolean {
@@ -40,8 +97,12 @@ interface Props {
   channelId: string | number | null;
   messages: ApiMessage[];
   onSend: (content: string, attachmentIds?: (string | number)[]) => void;
+  onReply: (content: string, replyTo: string | number, attachmentIds?: (string | number)[]) => void;
   loading?: boolean;
   roleMap?: Record<string, string | null | undefined>;
+  onOpenSidebar?: () => void;
+  emojiManifest?: EmojiManifest;
+  packBaseUrl?: string;
 }
 
 function getUserColor(beamIdentity: string, roleMap?: Record<string, string | null | undefined>): string {
@@ -84,7 +145,6 @@ function AttachmentView({ att }: { att: NonNullable<ApiMessage['attachments']>[n
 
 interface HistoryState {
   entries: ApiEditHistoryEntry[];
-  // viewIdx: 0..entries.length-1 = historical snapshot, entries.length = current version
   viewIdx: number;
   open: boolean;
 }
@@ -100,15 +160,22 @@ interface MessageRowProps {
   onEditChange: (v: string) => void;
   onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   onStartEdit: () => void;
+  onDelete: () => void;
+  onReply: () => void;
   historyState?: HistoryState;
   onHistoryToggle: () => void;
   onHistoryNav: (dir: -1 | 1) => void;
+  replyMsg?: ApiMessage | null;
+  myIdentity?: string;
+  packEmojis?: PackEmojiEntry[];
+  packBaseUrl?: string;
 }
 
 function MessageRow({
   msg, onUserClick, roleMap,
   isMyMsg, isEditing, editValue, editInputRef, onEditChange, onEditKeyDown,
-  onStartEdit, historyState, onHistoryToggle, onHistoryNav,
+  onStartEdit, onDelete, onReply, historyState, onHistoryToggle, onHistoryNav, replyMsg, myIdentity,
+  packEmojis, packBaseUrl,
 }: MessageRowProps) {
   const color = getUserColor(msg.beam_identity, roleMap);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -126,9 +193,9 @@ function MessageRow({
   const viewingHistory = historyState?.open && historyState.viewIdx < historyState.entries.length;
   const histEntries = historyState?.entries ?? [];
   const histIdx = historyState?.viewIdx ?? histEntries.length;
-  const totalVersions = histEntries.length + 1; // +1 for current
+  const totalVersions = histEntries.length + 1;
 
-  const hasActions = (isMyMsg || !!msg.edited_at) && !msg._optimistic;
+  const hasActions = !msg._optimistic;
 
   return (
     <div className={`${styles.msgRow} ${msg._optimistic ? styles.optimistic : ''} ${isEditing ? styles.editingRow : ''}`}>
@@ -149,6 +216,13 @@ function MessageRow({
           </button>
           {dropdownOpen && (
             <div className={styles.msgDropdown}>
+              <button className={styles.msgDropdownItem} onClick={() => { setDropdownOpen(false); onReply(); }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 17 4 12 9 7"/>
+                  <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+                </svg>
+                Reply
+              </button>
               {isMyMsg && (
                 <button className={styles.msgDropdownItem} onClick={() => { setDropdownOpen(false); onStartEdit(); }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -164,6 +238,17 @@ function MessageRow({
                     <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
                   </svg>
                   Edit history
+                </button>
+              )}
+              {isMyMsg && (
+                <button className={`${styles.msgDropdownItem} ${styles.msgDropdownItemDanger}`} onClick={() => { setDropdownOpen(false); onDelete(); }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/><path d="M14 11v6"/>
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                  </svg>
+                  Delete message
                 </button>
               )}
             </div>
@@ -206,6 +291,28 @@ function MessageRow({
           )}
         </div>
 
+        {replyMsg && !isEditing && (
+          <div className={styles.replyPreview}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0, marginTop: 1 }}>
+              <polyline points="9 17 4 12 9 7"/>
+              <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+            </svg>
+            <span className={styles.replyPreviewName}>{replyMsg.beam_identity.split('»')[0]}</span>
+            <span className={styles.replyPreviewText}>
+              {replyMsg.content ? replyMsg.content.slice(0, 80) + (replyMsg.content.length > 80 ? '…' : '') : '📎 attachment'}
+            </span>
+          </div>
+        )}
+        {msg.reply_to != null && !replyMsg && !isEditing && (
+          <div className={styles.replyPreview}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0, marginTop: 1 }}>
+              <polyline points="9 17 4 12 9 7"/>
+              <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+            </svg>
+            <span className={styles.replyPreviewText} style={{ fontStyle: 'italic' }}>Original message not loaded</span>
+          </div>
+        )}
+
         {isEditing ? (
           <div className={styles.editRow}>
             <input
@@ -223,17 +330,21 @@ function MessageRow({
           </div>
         ) : viewingHistory ? (
           <div className={styles.historyContent}>
-            <MarkdownContent content={histEntries[histIdx].content} />
+            <MarkdownContent content={histEntries[histIdx].content} myIdentity={myIdentity} packEmojis={packEmojis} packBaseUrl={packBaseUrl} />
             <span className={styles.historyTimestamp}>
               {new Date(histEntries[histIdx].edited_at * 1000).toLocaleString()}
             </span>
           </div>
         ) : (
-          msg.content && (
-            isGifUrl(msg.content)
-              ? <InlineImage src={msg.content} alt="GIF" />
-              : <MarkdownContent content={msg.content} />
-          )
+          msg.content && (() => {
+            if (isGifUrl(msg.content)) return <InlineImage src={msg.content} alt="GIF" />;
+            const ec = emojiOnlyCount(msg.content);
+            if (ec !== null && ec <= 5) {
+              const cls = ec <= 2 ? styles.jumboEmoji : styles.jumboEmojiSm;
+              return <span className={cls}>{msg.content}</span>;
+            }
+            return <MarkdownContent content={msg.content} myIdentity={myIdentity} packEmojis={packEmojis} packBaseUrl={packBaseUrl} />;
+          })()
         )}
 
         {!isEditing && !viewingHistory && msg.attachments && msg.attachments.length > 0 && (
@@ -253,13 +364,18 @@ interface PendingFile {
   previewUrl?: string;
 }
 
-export default function ChatMain({ channelName, channelId, messages, onSend, loading, roleMap }: Props) {
+export default function ChatMain({ channelName, channelId, messages, onSend, onReply, loading, roleMap, onOpenSidebar, emojiManifest, packBaseUrl }: Props) {
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiPickerTheme, setEmojiPickerTheme] = useState(() => getEmojiPickerTheme());
   const [gifOpen, setGifOpen] = useState(false);
   const [userPopup, setUserPopup] = useState<{ user: UserPopupInfo; pos: UserPopupPos } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<(ApiMessage & { _optimistic?: boolean }) | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const [emojiQuery, setEmojiQuery] = useState<string | null>(null);
+  const [emojiIdx, setEmojiIdx] = useState(0);
 
   // Edit mode state
   const [editingMsgId, setEditingMsgId] = useState<string | number | null>(null);
@@ -277,6 +393,34 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const gifBtnRef = useRef<HTMLButtonElement>(null);
   const gifPickerRef = useRef<HTMLDivElement>(null);
+
+  const memberNames = useMemo(() => Object.keys(roleMap ?? {}), [roleMap]);
+
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return memberNames.filter(n => n.toLowerCase().includes(q)).slice(0, 8);
+  }, [mentionQuery, memberNames]);
+
+  const packEmojiEntries = emojiManifest?.emojis ?? [];
+
+  const standardEmojiMatches = useMemo<EmojiEntry[]>(() => {
+    if (emojiQuery === null || emojiQuery.length < 1) return [];
+    return searchEmojis(emojiQuery, 8);
+  }, [emojiQuery]);
+
+  const packEmojiMatches = useMemo<PackEmojiEntry[]>(() => {
+    if (emojiQuery === null || emojiQuery.length < 1 || !packEmojiEntries.length) return [];
+    const q = emojiQuery.toLowerCase();
+    return packEmojiEntries.filter(e =>
+      e.shortcode.includes(q) || e.name.toLowerCase().includes(q) || e.tags?.some(t => t.includes(q))
+    ).slice(0, 6);
+  }, [emojiQuery, packEmojiEntries]);
+
+  const allEmojiMatches = useMemo(() => [
+    ...standardEmojiMatches.map(e => ({ kind: 'standard' as const, entry: e })),
+    ...packEmojiMatches.map(e => ({ kind: 'pack' as const, entry: e })),
+  ], [standardEmojiMatches, packEmojiMatches]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -338,6 +482,7 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
+    inputRef.current?.focus();
     const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
     const entry: PendingFile = { file, uploading: true, previewUrl };
     setPendingFiles(prev => [...prev, entry]);
@@ -363,10 +508,109 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
     const stillUploading = pendingFiles.some(f => f.uploading);
     if (stillUploading || (!text && readyIds.length === 0) || !channelId) return;
 
-    onSend(text, readyIds.length > 0 ? readyIds : undefined);
+    if (replyingTo) {
+      onReply(text, replyingTo.id, readyIds.length > 0 ? readyIds : undefined);
+      setReplyingTo(null);
+    } else {
+      onSend(text, readyIds.length > 0 ? readyIds : undefined);
+    }
     pendingFiles.forEach(f => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
     setPendingFiles([]);
     setInput('');
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setInput(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const textBefore = val.slice(0, cursor);
+    // @mention detection
+    const atMatch = textBefore.match(/@([^@]*)$/);
+    if (atMatch) {
+      setMentionQuery(atMatch[1]);
+      setMentionIdx(0);
+    } else {
+      setMentionQuery(null);
+    }
+    // :emoji shortcode detection — only trigger after at least 1 char after colon
+    const emojiMatch = textBefore.match(/:([a-z0-9_+\-]{1,30})$/);
+    if (emojiMatch) {
+      setEmojiQuery(emojiMatch[1]);
+      setEmojiIdx(0);
+    } else {
+      setEmojiQuery(null);
+    }
+  }
+
+  function completeMention(name: string) {
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const textBefore = input.slice(0, cursor);
+    const atMatch = textBefore.match(/@([^@]*)$/);
+    if (!atMatch) return;
+    const start = cursor - atMatch[0].length;
+    const newInput = input.slice(0, start) + '@' + name + ' ' + input.slice(cursor);
+    setInput(newInput);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + name.length + 2;
+      el?.setSelectionRange(pos, pos);
+    });
+  }
+
+  function completeEmojiShortcode(entry: EmojiEntry) {
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const textBefore = input.slice(0, cursor);
+    const emojiMatch = textBefore.match(/:([a-z0-9_+\-]{1,30})$/);
+    if (!emojiMatch) return;
+    const start = cursor - emojiMatch[0].length;
+    const newInput = input.slice(0, start) + entry.e + ' ' + input.slice(cursor);
+    setInput(newInput);
+    setEmojiQuery(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + [...entry.e].length + 1;
+      el?.setSelectionRange(pos, pos);
+    });
+  }
+
+  function completePackEmoji(entry: PackEmojiEntry) {
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const textBefore = input.slice(0, cursor);
+    const emojiMatch = textBefore.match(/:([a-z0-9_+\-]{1,30})$/);
+    const token = `:${entry.shortcode}: `;
+    const start = emojiMatch ? cursor - emojiMatch[0].length : cursor;
+    const newInput = input.slice(0, start) + token + input.slice(cursor);
+    setInput(newInput);
+    setEmojiQuery(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + token.length;
+      el?.setSelectionRange(pos, pos);
+    });
+  }
+
+  function insertPackEmoji(entry: PackEmojiEntry) {
+    const token = `:${entry.shortcode}: `;
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const newInput = input.slice(0, cursor) + token + input.slice(cursor);
+    setInput(newInput);
+    setEmojiOpen(false);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = cursor + token.length;
+      el?.setSelectionRange(pos, pos);
+    });
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  async function handleDelete(msgId: string | number) {
+    await deleteMessage(msgId);
   }
 
   // ── Edit mode ─────────────────────────────────────────────────────────────
@@ -397,6 +641,57 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
   // ── Up arrow hotkey ───────────────────────────────────────────────────────
 
   function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (emojiQuery !== null && allEmojiMatches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setEmojiIdx(i => (i + 1) % allEmojiMatches.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setEmojiIdx(i => (i - 1 + allEmojiMatches.length) % allEmojiMatches.length);
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        const match = allEmojiMatches[emojiIdx];
+        if (match.kind === 'standard') completeEmojiShortcode(match.entry);
+        else completePackEmoji(match.entry);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setEmojiQuery(null);
+        return;
+      }
+    }
+
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIdx(i => (i + 1) % mentionMatches.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIdx(i => (i - 1 + mentionMatches.length) % mentionMatches.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && mentionMatches.length > 0)) {
+        e.preventDefault();
+        completeMention(mentionMatches[mentionIdx]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setMentionQuery(null);
+        return;
+      }
+    }
+
+    if (e.key === 'Escape' && replyingTo) {
+      setReplyingTo(null);
+      return;
+    }
+
     if (e.key === 'Enter') { handleSend(); return; }
     if (e.key === 'ArrowUp' && !input) {
       const lastOwn = [...messages].reverse().find(
@@ -413,16 +708,13 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
 
   async function handleHistoryToggle(msgId: string | number) {
     const existing = historyMap[msgId];
-    if (!existing) {
+    if (existing?.open) {
+      setHistoryMap(prev => ({ ...prev, [msgId]: { ...existing, open: false } }));
+    } else {
       const entries = await fetchMessageHistory(msgId);
       setHistoryMap(prev => ({
         ...prev,
         [msgId]: { entries, viewIdx: entries.length, open: true },
-      }));
-    } else {
-      setHistoryMap(prev => ({
-        ...prev,
-        [msgId]: { ...existing, open: !existing.open },
       }));
     }
   }
@@ -442,9 +734,23 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
     setUserPopup({ user: { name }, pos: { x: e.clientX, y: e.clientY } });
   }
 
+  // Build a lookup map for reply_to message references
+  const messageById = useMemo(() => {
+    const map: Record<string, ApiMessage> = {};
+    for (const m of messages) map[String(m.id)] = m;
+    return map;
+  }, [messages]);
+
   return (
     <main className={styles.main}>
       <div className={styles.chatHeader}>
+        <button className={styles.menuBtn} onClick={onOpenSidebar} aria-label="Open channels">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
         <svg className={styles.chatHash} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <line x1="4" y1="9" x2="20" y2="9"/>
           <line x1="4" y1="15" x2="20" y2="15"/>
@@ -478,9 +784,15 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
             onEditChange={setEditInput}
             onEditKeyDown={handleEditKeyDown}
             onStartEdit={() => startEdit(msg)}
+            onDelete={() => handleDelete(msg.id)}
+            onReply={() => { setReplyingTo(msg); setTimeout(() => inputRef.current?.focus(), 30); }}
             historyState={historyMap[msg.id]}
             onHistoryToggle={() => handleHistoryToggle(msg.id)}
             onHistoryNav={dir => handleHistoryNav(msg.id, dir)}
+            replyMsg={msg.reply_to != null ? messageById[String(msg.reply_to)] ?? null : null}
+            myIdentity={myIdentity}
+            packEmojis={packEmojiEntries}
+            packBaseUrl={packBaseUrl}
           />
         ))}
         <div ref={bottomRef} />
@@ -489,6 +801,23 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
       <div className={styles.inputArea}>
         {emojiOpen && (
           <div className={styles.emojiPickerWrap}>
+            {packEmojiEntries.length > 0 && packBaseUrl && (
+              <div className={styles.packEmojiSection}>
+                <div className={styles.emojiShortcodeHeader}>{emojiManifest?.pack_name ?? 'Pack'} Emojis</div>
+                <div className={styles.packEmojiGrid}>
+                  {packEmojiEntries.map(entry => (
+                    <button
+                      key={entry.shortcode}
+                      className={styles.packEmojiGridItem}
+                      onClick={() => insertPackEmoji(entry)}
+                      title={`:${entry.shortcode}:`}
+                    >
+                      <img src={packBaseUrl + entry.file} alt={entry.name} loading="eager" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme} lazyLoadEmojis height={380} width={320} />
           </div>
         )}
@@ -519,6 +848,77 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
           </div>
         )}
 
+        {emojiQuery !== null && allEmojiMatches.length > 0 && (
+          <div className={styles.emojiShortcodeList}>
+            {standardEmojiMatches.length > 0 && (
+              <>
+                <div className={styles.emojiShortcodeHeader}>Emoji matching :{emojiQuery}</div>
+                {standardEmojiMatches.map((entry, i) => (
+                  <button
+                    key={entry.n}
+                    className={`${styles.emojiShortcodeItem} ${i === emojiIdx ? styles.emojiShortcodeItemActive : ''}`}
+                    onMouseDown={e => { e.preventDefault(); completeEmojiShortcode(entry); }}
+                  >
+                    <span className={styles.emojiShortcodeGlyph}>{entry.e}</span>
+                    <span className={styles.emojiShortcodeName}>:{entry.n}:</span>
+                  </button>
+                ))}
+              </>
+            )}
+            {packEmojiMatches.length > 0 && (
+              <>
+                <div className={styles.emojiShortcodeHeader}>{emojiManifest?.pack_name ?? 'Pack'} Emojis</div>
+                {packEmojiMatches.map((entry, i) => {
+                  const globalIdx = standardEmojiMatches.length + i;
+                  return (
+                    <button
+                      key={entry.shortcode}
+                      className={`${styles.emojiShortcodeItem} ${globalIdx === emojiIdx ? styles.emojiShortcodeItemActive : ''}`}
+                      onMouseDown={e => { e.preventDefault(); completePackEmoji(entry); }}
+                    >
+                      <span className={styles.emojiShortcodeGlyph}>
+                        {packBaseUrl && <img src={packBaseUrl + entry.file} alt={entry.name} loading="eager" style={{ width: 20, height: 20, objectFit: 'contain' }} />}
+                      </span>
+                      <span className={styles.emojiShortcodeName}>:{entry.shortcode}:</span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+
+        {mentionQuery !== null && mentionMatches.length > 0 && (
+          <div className={styles.mentionList}>
+            {mentionMatches.map((name, i) => (
+              <button
+                key={name}
+                className={`${styles.mentionItem} ${i === mentionIdx ? styles.mentionItemActive : ''}`}
+                onMouseDown={e => { e.preventDefault(); completeMention(name); }}
+              >
+                <UserAvatar name={name} size={22} radius={6} color={getUserColor(name, roleMap)} />
+                <span>{name.split('»')[0]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {replyingTo && (
+          <div className={styles.replyBanner}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="9 17 4 12 9 7"/>
+              <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+            </svg>
+            <span>Replying to </span>
+            <span className={styles.replyBannerName}>{replyingTo.beam_identity.split('»')[0]}</span>
+            <button className={styles.replyBannerClose} onClick={() => setReplyingTo(null)} title="Cancel reply">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
         <div className={styles.inputCapsule}>
           <input type="file" ref={fileInputRef} style={{ display: 'none' }}
             accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav,application/pdf,text/plain,text/markdown,application/zip,application/x-zip-compressed"
@@ -532,8 +932,10 @@ export default function ChatMain({ channelName, channelId, messages, onSend, loa
           </button>
           <input ref={inputRef} type="text" className={styles.chatInput}
             placeholder={channelId ? `Message #${channelName}` : 'Select a channel'}
-            value={input} onChange={e => setInput(e.target.value)}
+            value={input}
+            onChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
+            onBlur={() => setTimeout(() => { setMentionQuery(null); setEmojiQuery(null); }, 150)}
             autoComplete="off" disabled={!channelId} />
           <button ref={emojiBtnRef} className={`${styles.actBtn} ${emojiOpen ? styles.actBtnActive : ''}`}
             onClick={() => { setEmojiOpen(o => !o); setGifOpen(false); }} disabled={!channelId} title="Emoji">

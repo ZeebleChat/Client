@@ -234,6 +234,61 @@
   font-weight: 700;
 }
 
+/* ── Profile banner ────────────────────────────────────────────────────────── */
+
+.bannerWrap {
+  position: relative;
+  width: 100%;
+  height: 100px;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: var(--bg-main);
+  border: var(--border-soft);
+  box-shadow: var(--neu-in-sm);
+  margin-bottom: 4px;
+}
+
+.bannerImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bannerPlaceholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, var(--bg-raised) 0%, var(--bg-main) 100%);
+}
+
+.bannerOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.bannerWrap:hover .bannerOverlay {
+  opacity: 1;
+}
+
+.bannerLock {
+  position: absolute;
+  bottom: 8px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
 /* ── Profile card ──────────────────────────────────────────────────────────── */
 
 .profileCard {
@@ -1586,3 +1641,4 @@
   color: var(--text-3);
   border: 1px solid rgba(148, 163, 184, 0.25);
 }
+

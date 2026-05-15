@@ -1,0 +1,41 @@
+name: "Dark Midnight"
+author: "Creeper7"
+version: "1.0.0"
+description: "A sleek dark theme with purple accents and custom sounds"
+price: 0
+
+assets:
+  colors: "colors.yaml"
+
+  sounds:
+    message_send: "sounds/send.mp3"
+    message_receive: "sounds/receive.mp3"
+    notification: "sounds/notification.mp3"
+    user_join: "sounds/join.mp3"
+    user_leave: "sounds/leave.mp3"
+    voice_connect: "sounds/voice_connect.mp3"
+    voice_disconnect: "sounds/voice_disconnect.mp3"
+    mute: "sounds/mute.mp3"
+    unmute: "sounds/unmute.mp3"
+    deafen: "sounds/deafen.mp3"
+
+  images:
+    logo: "images/logo.png"
+    background_chat: "images/chat_bg.png"
+
+  gifs:
+    loading: "gifs/loading.gif"
+    typing_indicator: "gifs/typing.gif"
+
+  animations:
+    message_send_effect: "animations/send.json"
+
+  emojis:
+    pack_path: "emojis/"
+    manifest: "emojis/manifest.json"
+
+features:
+  custom_sounds: true
+  animated_backgrounds: false
+  custom_emojis: true
+  message_animations: true

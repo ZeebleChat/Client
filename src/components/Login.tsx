@@ -36,6 +36,7 @@ export default function Login({ onLogin }: Props) {
   const [pinLoading, setPinLoading] = useState(false);
 
   // Forgot password flow
+  // Forgot password flow
   const [forgotStep, setForgotStep] = useState<'off' | 'email' | 'reset'>('off');
   const [resetEmail, setResetEmail] = useState('');
   const [resetPin, setResetPin] = useState('');
@@ -66,7 +67,7 @@ export default function Login({ onLogin }: Props) {
     e.preventDefault();
     setError('');
 
-    if (!isRegister && !identity.trim()) { setError('Beam identity is required'); return; }
+    if (!isRegister && !identity.trim()) { setError('Beam identity or email is required'); return; }
     if (!password) { setError('Password is required'); return; }
     if (isRegister && password.length < 8) { setError('Password must be at least 8 characters'); return; }
     if (isRegister && password !== confirmPassword) { setError('Passwords do not match'); return; }
@@ -81,7 +82,9 @@ export default function Login({ onLogin }: Props) {
       if (isRegister) {
         result = await registerReq(displayName.trim(), password, email.trim());
       } else {
-        result = await loginReq(identity.trim(), password);
+        const credential = identity.trim();
+        const useEmail = credential.includes('@');
+        result = await loginReq(credential, password, useEmail);
       }
 
       if (!result.ok || !result.data?.token) {
@@ -362,11 +365,11 @@ export default function Login({ onLogin }: Props) {
 
           {!isRegister && (
             <div className={styles.field}>
-              <label className={styles.label}>Beam Identity</label>
+              <label className={styles.label}>Beam Identity or Email</label>
               <input
                 className={styles.input}
                 type="text"
-                placeholder="user»1234"
+                placeholder="user»1234 or you@example.com"
                 value={identity}
                 onChange={e => setIdentity(e.target.value)}
                 autoComplete="username"

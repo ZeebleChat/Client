@@ -1,7 +1,7 @@
-export const ENV_AUTH_URL = import.meta.env.VITE_AUTH_URL || 'https://api.zeeble.xyz';
-export const ENV_DM_URL = import.meta.env.VITE_DM_URL || 'https://dm.zeeble.xyz';
-export const ENV_ZCLOUD_URL = import.meta.env.VITE_ZCLOUD_URL || 'https://cloud.zeeble.xyz';
-export const ENV_TENOR_KEY: string = import.meta.env.VITE_TENOR_API_KEY || '';
+export const ENV_AUTH_URL    = import.meta.env.VITE_AUTH_URL    || (import.meta.env.DEV ? '/zb-api'    : 'https://api.zeeble.xyz');
+export const ENV_MARKET_URL  = import.meta.env.VITE_MARKET_URL  || (import.meta.env.DEV ? '/zb-market' : 'https://market.zeeble.xyz');
+export const ENV_DM_URL      = import.meta.env.VITE_DM_URL      || 'https://dm.zeeble.xyz';
+export const ENV_ZCLOUD_URL  = import.meta.env.VITE_ZCLOUD_URL  || (import.meta.env.DEV ? '/zb-cloud'  : 'https://cloud.zeeble.xyz');
 
 export const getAuthUrl = (): string =>
   localStorage.getItem('auth_server_url') || ENV_AUTH_URL;
@@ -11,6 +11,9 @@ export const getDmUrl = (): string =>
 
 export const getZcloudUrl = (): string =>
   localStorage.getItem('zcloud_url') || ENV_ZCLOUD_URL;
+
+export const getMarketUrl = (): string =>
+  localStorage.getItem('market_server_url') || ENV_MARKET_URL;
 
 export const getServerUrl = (): string =>
   localStorage.getItem('active_server_url') || '';

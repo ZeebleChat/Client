@@ -10,7 +10,6 @@ interface Props {
 state: VoiceState;
 onLeave: () => void;
 onClose: () => void;
-onToggleScreenShare: () => void;
 }
 
 const MicIcon = () => (
@@ -20,15 +19,8 @@ const MicIcon = () => (
   </svg>
 );
 
-const MonitorIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="2" y="3" width="20" height="14" rx="2"/>
-    <path d="M8 21h8M12 17v4"/>
-  </svg>
-);
-
-export default function VoiceModal({ state, onLeave, onClose, onToggleScreenShare }: Props) {
-  const { status, channel, participants, micLevel, micSilent, errorMsg, isScreenSharing, remoteScreens } = state;
+export default function VoiceModal({ state, onLeave, onClose }: Props) {
+  const { status, channel, participants, micLevel, micSilent, errorMsg } = state;
 
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose();
@@ -80,20 +72,6 @@ export default function VoiceModal({ state, onLeave, onClose, onToggleScreenShar
           </div>
         )}
 
-        {/* Controls */}
-        {status === 'connected' && (
-          <div className={styles.controls}>
-            <button
-              className={`${styles.screenShareBtn} ${isScreenSharing ? styles.screenShareBtnActive : ''}`}
-              onClick={onToggleScreenShare}
-              title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
-            >
-              <MonitorIcon />
-              {isScreenSharing ? 'Stop Sharing' : 'Share Screen'}
-            </button>
-          </div>
-        )}
-
         {/* Participants */}
         {status === 'connected' && (
           <div className={styles.participants}>
@@ -114,9 +92,6 @@ export default function VoiceModal({ state, onLeave, onClose, onToggleScreenShar
                   <span className={styles.pName}>{p.name}</span>
                   {p.isMuted && <span className={styles.pTag} style={{ color: 'var(--red)' }}>muted</span>}
                   {p.isSpeaking && <span className={styles.pTag} style={{ color: 'var(--green)' }}>speaking</span>}
-                  {remoteScreens.some(s => s.identity === p.identity) && (
-                    <span className={styles.pTag} style={{ color: 'var(--accent)' }}>sharing</span>
-                  )}
                 </div>
               ))
             )}

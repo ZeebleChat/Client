@@ -1,0 +1,48 @@
+{
+  "pack_name": "Dark Midnight Emojis",
+  "version": "1.0.0",
+  "emojis": [
+    {
+      "name": "wave",
+      "shortcode": ":wave:",
+      "file": "wave.png",
+      "category": "gestures",
+      "tags": ["hello", "hi", "greeting"]
+    },
+    {
+      "name": "thumbsup",
+      "shortcode": ":thumbsup:",
+      "file": "thumbsup.png",
+      "category": "gestures",
+      "tags": ["like", "approve", "good"]
+    },
+    {
+      "name": "heart",
+      "shortcode": ":heart:",
+      "file": "heart.png",
+      "category": "emotions",
+      "tags": ["love", "like"]
+    },
+    {
+      "name": "laugh",
+      "shortcode": ":laugh:",
+      "file": "laugh.gif",
+      "category": "emotions",
+      "tags": ["lol", "funny", "haha"],
+      "animated": true
+    },
+    {
+      "name": "zeeble",
+      "shortcode": ":zeeble:",
+      "file": "zeeble.png",
+      "category": "custom",
+      "tags": ["logo", "brand"]
+    }
+  ],
+  "categories": [
+    "emotions",
+    "gestures",
+    "objects",
+    "custom"
+  ]
+}

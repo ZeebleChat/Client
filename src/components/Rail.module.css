@@ -26,40 +26,43 @@
   font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
-.addServerBar {
+.railBottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 4px;
+}
+
+.circleBtn {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-dark);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: calc(100% - 16px);
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--bg-dark);
+  color: var(--text-2);
   box-shadow: var(--neu-out-sm);
   border: var(--border-soft);
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 600;
-  font-family: 'Plus Jakarta Sans', sans-serif;
   cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  flex-shrink: 0;
 }
 
-.addServerBar:hover {
-  color: var(--accent);
+.circleBtn:hover {
+  color: var(--text-1);
+  transform: translateY(-2px);
   box-shadow: 6px 6px 12px var(--shadow-dark), -3px -3px 8px var(--shadow-light);
-  transform: translateY(-1px);
 }
 
-.addServerBarPlus {
-  font-size: 16px;
-  font-weight: 300;
-  line-height: 1;
-}
-
-.addServerBarLabel {
-  line-height: 1;
+.circleBtn.active {
+  background: var(--bg-main);
+  box-shadow: var(--neu-in);
+  color: var(--accent);
+  border-color: transparent;
 }
 
 .sep {
@@ -173,4 +176,69 @@
 
 .contextMenuItem:focus {
   box-shadow: inset 0 0 0 2px var(--accent-glow);
+}
+
+@media (max-width: 767px) {
+  .rail {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    flex-direction: row;
+    padding: 0 8px;
+    gap: 4px;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 50;
+    border-top: var(--border-soft);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .railBottom {
+    margin-top: 0;
+    flex-direction: row;
+    gap: 4px;
+    padding-bottom: 0;
+    align-items: center;
+  }
+
+  .brand {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 15px;
+    margin-bottom: 0;
+  }
+
+  .sep,
+  .sepBottom {
+    display: none;
+  }
+
+  .node {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .node svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .node.active::before {
+    left: 50%;
+    top: auto;
+    bottom: -8px;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 3px;
+    border-radius: 3px;
+  }
+
+  .circleBtn {
+    width: 36px;
+    height: 36px;
+  }
 }

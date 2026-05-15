@@ -13,13 +13,14 @@ import railStyles from './RailAdapter.module.css';
 interface Props {
   servers: ApiServer[];
   activeServerUrl: string;
-  view: 'server' | 'home';
+  view: 'server' | 'home' | 'community';
   onSelectServer: (url: string, name: string) => void;
   onLogout: () => void;
   onAddServer?: () => void;
   onHome?: () => void;
   onOpenAccount?: () => void;
   onLeaveServer?: (serverUrl: string) => void;
+  onCommunity?: () => void;
 }
 
 interface ContextMenuState {
@@ -49,7 +50,7 @@ async function pingServer(url: string): Promise<boolean> {
   } catch { return false; }
 }
 
-export default function RailAdapter({ servers, activeServerUrl, view, onSelectServer, onHome, onLeaveServer, onAddServer }: Props) {
+export default function RailAdapter({ servers, activeServerUrl, view, onSelectServer, onHome, onLeaveServer, onAddServer, onCommunity }: Props) {
   const [icons, setIcons] = useState<Record<string, string | null>>({});
   const [offlineServers, setOfflineServers] = useState<Set<string>>(new Set());
   const offlineRef = useRef<Set<string>>(new Set());
@@ -176,15 +177,6 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
       >
         Z
       </button>
-      <button
-        className={styles.addServerBar}
-        title="Add Server"
-        aria-label="Add server"
-        onClick={onAddServer}
-      >
-        <span className={styles.addServerBarPlus}>+</span>
-      </button>
-
       {servers.map(server => {
         const isActive = view === 'server' && server.server_url === activeServerUrl;
         const iconUrl = icons[server.server_url];
@@ -217,6 +209,33 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
           </button>
         );
       })}
+
+      {/* Bottom action buttons */}
+      <div className={styles.railBottom}>
+        <button
+          className={`${styles.circleBtn} ${view === 'community' ? styles.active : ''}`}
+          title="Community"
+          aria-label="Open community"
+          onClick={onCommunity}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+        </button>
+        <button
+          className={styles.circleBtn}
+          title="Add Server"
+          aria-label="Add server"
+          onClick={onAddServer}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </div>
 
       {/* Context Menu */}
       {contextMenu.visible && (

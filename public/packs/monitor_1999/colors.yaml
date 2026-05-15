@@ -1,0 +1,53 @@
+backgrounds:
+  primary: "#060d07"
+  secondary: "#0c1a0e"
+  tertiary: "#112114"
+  elevated: "#091209"
+  hover: "#152b18"
+  selected: "#1a361e"
+  input: "#040b05"
+
+text:
+  primary: "#a6ffb0"
+  secondary: "#52c263"
+  muted: "#2a6b38"
+  link: "#00ff41"
+  placeholder: "#1a4d24"
+
+accents:
+  primary: "#00ff41"
+  secondary: "#39ff60"
+  danger: "#ff3b3b"
+  success: "#00ff41"
+  warning: "#ffb000"
+  info: "#00e5ff"
+
+borders:
+  default: "#163d1e"
+  focus: "#00ff41"
+  divider: "#0c1a0e"
+
+status:
+  online: "#00ff41"
+  idle: "#ffb000"
+  dnd: "#ff3b3b"
+  offline: "#2a6b38"
+
+message:
+  own_bubble: "#00381a"
+  other_bubble: "#0c1a0e"
+  mention_bg: "#00ff4122"
+  mention_border: "#00ff41"
+
+components:
+  button_primary: "#00ff41"
+  button_primary_hover: "#39ff60"
+  button_secondary: "#152b18"
+  button_secondary_hover: "#1a361e"
+  button_danger: "#ff3b3b"
+  button_danger_hover: "#cc2222"
+  scrollbar_track: "#060d07"
+  scrollbar_thumb: "#163d1e"
+  scrollbar_thumb_hover: "#1a4d24"
+  code_block_bg: "#030803"
+  code_block_border: "#163d1e"

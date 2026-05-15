@@ -48,7 +48,7 @@ export default function Members({ groups, onDm }: Props) {
                   onClick={e => handleClick(e, { name: member.name, role: member.role, status: member.status })}
                 >
                   <div className={styles.memAvWrap}>
-                    <UserAvatar name={member.name} size={32} radius={10} color={color} className={styles.memAv} />
+                    <UserAvatar name={member.name} avatarId={member.avatar != null ? String(member.avatar) : undefined} size={32} radius={10} color={color} className={styles.memAv} />
                     <div className={`${styles.memDot} ${styles[sc]}`} />
                   </div>
                   <div className={styles.memInfo}>

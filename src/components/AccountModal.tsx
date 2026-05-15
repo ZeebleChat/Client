@@ -7,9 +7,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadStripe } from '@stripe/stripe-js';
-import type { Stripe, StripeCardElement } from '@stripe/stripe-js';
 import {
   getAccountInfo,
+  oauthStart,
+  oauthPoll,
+  oauthUnlink,
+  type OAuthProvider,
   updateDisplayName,
   sendEmailPinReq,
   verifyEmailPinReq,
@@ -22,6 +25,7 @@ import {
   fetchServers,
   removeServer,
   uploadAvatar,
+  uploadBanner,
   getAuthAttachmentUrl,
   createSubAccount,
   deleteSubAccount,
@@ -35,9 +39,8 @@ import {
   disableTotp,
   generateRecoveryCodes,
   getRecoveryCodesStatus,
-  createSubscription,
-  confirmSubscriptionPayment,
-  redeemPromoCode,
+  startIdentityVerification,
+  getIdentityStatus,
   type ApiFriend,
   type ApiFriendRequest,
   type ApiAccountInfo,
@@ -47,7 +50,7 @@ import {
 } from '../api';
 
 const stripePromise = loadStripe('pk_live_51TDqoL3D524x7zwNWBF2QWsFCixoCww15vFqIvCX6nGv0NIMw51zgM3OakA7sop5Jw6LQ3XDP8GYBftKPQc21C0500U3iLuR2O');
-import { getBeamIdentity, getToken } from '../auth';
+import { getBeamIdentity, getToken, saveSession } from '../auth';
 import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL } from '../config';
 import { setAvatarCache, getAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCache';
 import { useTheme, type Theme } from '../hooks/useTheme';
@@ -62,7 +65,7 @@ interface Props {
   onOpenDevPanel?: () => void;
 }
 
-type Tab = 'profile' | 'security' | 'friends' | 'servers' | 'subaccounts' | 'promo' | 'premium' | 'appearance' | 'notifications' | 'accessibility' | 'voice' | 'dev';
+type Tab = 'profile' | 'security' | 'friends' | 'servers' | 'subaccounts' | 'appearance' | 'notifications' | 'voice' | 'dev' | 'connections';
 
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 
@@ -101,8 +104,14 @@ function ProfileTab() {
   const [emailPinVerifying, setEmailPinVerifying] = useState(false);
   const [emailStatus, setEmailStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [bannerStatus, setBannerStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [showQr, setShowQr] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLInputElement>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'pending' | 'done'>('idle');
 
   useEffect(() => {
     getAccountInfo().then(data => {
@@ -169,6 +178,42 @@ function ProfileTab() {
     setTimeout(() => setEmailStatus(null), 3000);
   }
 
+  async function handleIdVerify() {
+    setVerifying(true);
+    setVerifyError(null);
+    const stripe = await stripePromise;
+    if (!stripe) { setVerifying(false); setVerifyError('Stripe failed to load.'); return; }
+    const result = await startIdentityVerification();
+    if (!result.ok || !result.clientSecret) {
+      setVerifying(false);
+      setVerifyError(result.error ?? 'Could not start verification.');
+      return;
+    }
+    setVerifyStatus('pending');
+    const { error } = await stripe.verifyIdentity(result.clientSecret);
+    setVerifying(false);
+    if (error) {
+      setVerifyStatus('idle');
+      setVerifyError(error.message ?? 'Verification cancelled or failed.');
+      return;
+    }
+    // Poll status — Stripe webhook may take a moment
+    setVerifyStatus('pending');
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      const { ageVerified } = await getIdentityStatus();
+      if (ageVerified) {
+        clearInterval(poll);
+        setVerifyStatus('done');
+        setInfo(prev => prev ? { ...prev, age_verified: true } : prev);
+      } else if (attempts >= 12) {
+        clearInterval(poll);
+        setVerifyStatus('pending');
+      }
+    }, 5000);
+  }
+
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -182,10 +227,76 @@ function ProfileTab() {
     e.target.value = '';
   }
 
+  async function handleBannerFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingBanner(true);
+    setBannerStatus(null);
+    const result = await uploadBanner(file);
+    setUploadingBanner(false);
+    if (result.ok && result.banner_attachment_id) {
+      setInfo(prev => prev ? { ...prev, banner_attachment_id: result.banner_attachment_id } : prev);
+      setBannerStatus({ ok: true, msg: 'Banner updated!' });
+    } else {
+      setBannerStatus({ ok: false, msg: result.error || 'Upload failed.' });
+    }
+    e.target.value = '';
+    setTimeout(() => setBannerStatus(null), 2500);
+  }
+
   const accountType = info?.account_type ?? '';
 
   return (
     <div className={styles.tabContent}>
+      <div
+        className={styles.bannerWrap}
+        onClick={() => bannerRef.current?.click()}
+        title={info?.premium ? 'Change banner' : 'Profile banners are a Radiant feature'}
+        style={{ cursor: info?.premium ? 'pointer' : 'default' }}
+      >
+        {info?.banner_attachment_id ? (
+          <img
+            src={getAuthAttachmentUrl(info.banner_attachment_id)}
+            className={styles.bannerImg}
+            alt="banner"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <div className={styles.bannerPlaceholder} />
+        )}
+        {info?.premium && (
+          <div className={styles.bannerOverlay}>
+            {uploadingBanner ? '…' : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            )}
+          </div>
+        )}
+        {!info?.premium && (
+          <div className={styles.bannerLock}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm3.1-9H8.9V6a3.1 3.1 0 0 1 6.2 0v2z"/>
+            </svg>
+            Radiant only
+          </div>
+        )}
+        <input
+          ref={bannerRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          style={{ display: 'none' }}
+          onChange={handleBannerFile}
+          disabled={!info?.premium}
+        />
+      </div>
+      {bannerStatus && (
+        <div className={`${styles.feedback} ${bannerStatus.ok ? styles.feedbackOk : styles.feedbackErr}`}>
+          {bannerStatus.msg}
+        </div>
+      )}
       <div className={styles.profileCard}>
         <div className={styles.avatarWrap} onClick={() => fileRef.current?.click()} title="Change avatar">
           <Avatar name={displayName || beamIdentity} avatarId={info?.avatar_attachment_id} size={64} />
@@ -343,6 +454,67 @@ function ProfileTab() {
       >
         {saving ? 'Saving…' : 'Save Changes'}
       </button>
+
+      {/* ── Age Verification ── */}
+      <div className={styles.sectionTitle} style={{ marginTop: 24 }}>Age Verification</div>
+      <p style={{ fontSize: 13, color: 'var(--text-muted, rgba(255,255,255,0.45))', margin: '-8px 0 0' }}>
+        Some states require age verification to access age-restricted content. Completing any method also verifies your account.
+      </p>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingRowText}>
+          <span className={styles.settingRowLabel}>Government ID</span>
+          <span className={styles.settingRowSub}>
+            {info?.age_verified
+              ? 'Your identity has been verified via government ID.'
+              : verifyStatus === 'pending'
+                ? 'Verification submitted — this can take a moment.'
+                : 'Securely verify your age with Stripe Identity. Your ID is never stored by Zeeble.'}
+          </span>
+          {verifyError && (
+            <span className={styles.settingRowSub} style={{ color: 'var(--error, #f87171)', marginTop: 2 }}>
+              {verifyError}
+            </span>
+          )}
+        </div>
+        {info?.age_verified || verifyStatus === 'done' ? (
+          <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Verified</span>
+        ) : (
+          <button
+            className={styles.saveBtn}
+            onClick={handleIdVerify}
+            disabled={verifying || verifyStatus === 'pending'}
+          >
+            {verifying ? 'Starting…' : verifyStatus === 'pending' ? 'Pending…' : 'Verify ID'}
+          </button>
+        )}
+      </div>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingRowText}>
+          <span className={styles.settingRowLabel}>Email Account Age</span>
+          {info?.email
+            ? <span className={styles.settingRowSub} style={{ color: 'var(--accent)' }}>
+                Verified — your email account is on record.
+              </span>
+            : <span className={styles.settingRowSub}>
+                Add and verify your email above to satisfy this requirement.
+              </span>
+          }
+        </div>
+        {info?.email
+          ? <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Done</span>
+          : <button className={styles.saveBtn} disabled style={{ opacity: 0.4 }}>Verify</button>
+        }
+      </div>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingRowText}>
+          <span className={styles.settingRowLabel}>Phone Number</span>
+          <span className={styles.settingRowSub}>Verify your account with a phone number.</span>
+        </div>
+        <button className={styles.saveBtn}>Verify</button>
+      </div>
     </div>
   );
 }
@@ -1319,368 +1491,6 @@ function SubaccountsTab() {
   );
 }
 
-// ── Premium tab ────────────────────────────────────────────────────────────────
-
-// freeVal / premiumVal: a string value, 'check', 'included', or null (= X mark)
-const PREMIUM_PERKS: { label: string; freeVal: string | 'check' | 'included' | null; premiumVal: string | 'check' | 'included' | null; tooltip?: string }[] = [
-  { label: 'Join server',                        freeVal: '100',       premiumVal: '200'      },
-  { label: 'Zeeble cloud servers (create)',      freeVal: '10',       premiumVal: '30'       },
-  { label: 'Sub-accounts',                       freeVal: '10',       premiumVal: '20'       },
-  { label: 'Message search',                     freeVal: 'included', premiumVal: 'included' },
-  { label: 'Custom beam tag',                    freeVal: null,       premiumVal: 'check'    },
-  { label: 'Profile banner & animated avatar',   freeVal: null,       premiumVal: 'check'    },
-  {
-    label:      'Monthly boosts',
-    freeVal:    null,
-    premiumVal: '5',
-    tooltip:    'Boosts unlock extra emoji & sticker slots and make them globally available across Zeeble. On cloud servers, they also expand the server\'s total limits. On self-hosted servers, they make your emojis & stickers global.',
-  },
-];
-
-// ── PromoTab ──────────────────────────────────────────────────────────────────
-
-function PromoTab() {
-  const [code, setCode] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  async function handleRedeem() {
-    const trimmed = code.trim().toUpperCase();
-    if (!trimmed) return;
-    setLoading(true);
-    setStatus(null);
-    const result = await redeemPromoCode(trimmed);
-    setLoading(false);
-    setStatus({ ok: result.ok, msg: result.ok ? (result.message ?? 'Promo code redeemed!') : (result.error ?? 'Failed to redeem code.') });
-    if (result.ok) setCode('');
-  }
-
-  return (
-    <div className={styles.tabContent}>
-      <p className={styles.sectionTitle}>Redeem Promo Code</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <label className={styles.fieldLabel}>Promo Code</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            className={styles.input}
-            placeholder="Enter your code"
-            value={code}
-            onChange={e => setCode(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && !loading && handleRedeem()}
-            maxLength={32}
-            spellCheck={false}
-          />
-          <button
-            className={styles.saveBtn}
-            onClick={handleRedeem}
-            disabled={loading || !code.trim()}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            {loading ? 'Redeeming…' : 'Redeem'}
-          </button>
-        </div>
-        {status && (
-          <p style={{ fontSize: 13, color: status.ok ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', margin: 0 }}>
-            {status.msg}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── PremiumTab ────────────────────────────────────────────────────────────────
-
-type PayStep = 'plans' | 'card' | 'success';
-
-function PremiumTab() {
-  const [info, setInfo] = useState<ApiAccountInfo | null>(null);
-  const [step, setStep] = useState<PayStep>('plans');
-  const [clientSecret, setClientSecret] = useState('');
-  const [invoiceId, setInvoiceId] = useState('');
-  const [loadingSubscribe, setLoadingSubscribe] = useState(false);
-  const [loadingPay, setLoadingPay] = useState(false);
-  const [subscribeError, setSubscribeError] = useState<string | null>(null);
-  const [cardError, setCardError] = useState<string | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [stripeObj, setStripeObj] = useState<Stripe | null>(null);
-  const [cardElement, setCardElement] = useState<StripeCardElement | null>(null);
-
-  useEffect(() => { getAccountInfo().then(setInfo); }, []);
-
-  const isPremium = info?.premium === true;
-
-  // Mount the Stripe card element when the card step is shown
-  useEffect(() => {
-    if (step !== 'card') return;
-    let card: StripeCardElement | null = null;
-
-    stripePromise.then(s => {
-      if (!s || !cardRef.current) return;
-      const elements = s.elements();
-      card = elements.create('card', {
-        style: {
-          base: {
-            color: '#ffffff',
-            fontFamily: '"Plus Jakarta Sans", sans-serif',
-            fontSize: '14px',
-            '::placeholder': { color: 'rgba(255,255,255,0.35)' },
-            iconColor: 'rgba(255,255,255,0.5)',
-          },
-          invalid: { color: '#f87171', iconColor: '#f87171' },
-        },
-      });
-      card.mount(cardRef.current!);
-      setStripeObj(s);
-      setCardElement(card);
-    });
-
-    return () => {
-      card?.destroy();
-      setCardElement(null);
-      setStripeObj(null);
-    };
-  }, [step]);
-
-  async function handleGetPremium() {
-    setLoadingSubscribe(true);
-    setSubscribeError(null);
-    const result = await createSubscription();
-    setLoadingSubscribe(false);
-    if (!result.ok) {
-      setSubscribeError(result.error ?? 'Something went wrong');
-      return;
-    }
-    setClientSecret(result.clientSecret!);
-    setInvoiceId(result.invoiceId!);
-    setCardError(null);
-    setStep('card');
-  }
-
-  async function handlePay() {
-    if (!stripeObj || !cardElement) return;
-    setLoadingPay(true);
-    setCardError(null);
-
-    // Step 1: Confirm the SetupIntent — saves the card securely via Stripe
-    const { setupIntent, error } = await stripeObj.confirmCardSetup(clientSecret, {
-      payment_method: { card: cardElement },
-    });
-
-    if (error) {
-      setCardError(error.message ?? 'Card declined');
-      setLoadingPay(false);
-      return;
-    }
-
-    const paymentMethodId = typeof setupIntent?.payment_method === 'string'
-      ? setupIntent.payment_method
-      : (setupIntent?.payment_method as { id?: string })?.id ?? '';
-
-    if (!paymentMethodId) {
-      setCardError('Failed to save payment method');
-      setLoadingPay(false);
-      return;
-    }
-
-    // Step 2: Charge the first invoice using the saved payment method
-    const result = await confirmSubscriptionPayment(invoiceId, paymentMethodId);
-
-    if (!result.ok) {
-      setCardError(result.error ?? 'Payment failed');
-      setLoadingPay(false);
-      return;
-    }
-
-    // Step 3: Handle 3D Secure if the card requires it
-    if (result.requiresAction && result.clientSecret) {
-      const { error: actionError } = await stripeObj.handleCardAction(result.clientSecret);
-      if (actionError) {
-        setCardError(actionError.message ?? '3D Secure verification failed');
-        setLoadingPay(false);
-        return;
-      }
-    }
-
-    setLoadingPay(false);
-    setStep('success');
-    getAccountInfo().then(setInfo);
-  }
-
-  function PerkCell({ val, isPremiumCol }: { val: string | null; isPremiumCol: boolean }) {
-    if (val === null) {
-      return (
-        <span className={styles.perkX}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </span>
-      );
-    }
-    if (val === 'check') {
-      return (
-        <span className={isPremiumCol ? styles.perkCheckPremium : styles.perkCheckFree}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </span>
-      );
-    }
-    if (val === 'included') {
-      return (
-        <span className={isPremiumCol ? styles.perkIncludedPremium : styles.perkIncludedFree}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          Included
-        </span>
-      );
-    }
-    if (val === 'priority') {
-      return (
-        <span className={styles.perkPriority}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 3 }}>
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-          </svg>
-          Priority
-        </span>
-      );
-    }
-    return <span className={isPremiumCol ? styles.perkNumPremium : styles.perkNumFree}>{val}</span>;
-  }
-
-  const perksList = (
-    <div className={styles.perksList}>
-      <div className={styles.perkHeader}>
-        <span className={styles.perkHeaderLabel} />
-        <span className={styles.perkHeaderFree}>Free</span>
-        <span className={styles.perkHeaderPremium}>Premium</span>
-      </div>
-      {PREMIUM_PERKS.map(p => (
-        <div key={p.label} className={styles.perkRow}>
-          <span className={styles.perkLabel}>
-            {p.label}
-            {p.tooltip && (
-              <span className={styles.perkTooltipWrap}>
-                <svg className={styles.perkInfoIcon} width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="10" opacity="0.15"/>
-                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.8"/>
-                  <line x1="12" y1="11" x2="12" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                  <circle cx="12" cy="7.5" r="1.1"/>
-                </svg>
-                <span className={styles.perkTooltip}>{p.tooltip}</span>
-              </span>
-            )}
-          </span>
-          <span className={styles.perkColFree}><PerkCell val={p.freeVal} isPremiumCol={false} /></span>
-          <span className={styles.perkColPremium}><PerkCell val={p.premiumVal} isPremiumCol={true} /></span>
-        </div>
-      ))}
-    </div>
-  );
-
-  const isActive = isPremium || step === 'success';
-
-  const banner = (
-    <div className={`${styles.premiumBanner} ${isActive ? styles.premiumBannerActive : ''}`}>
-      <div className={styles.premiumBannerIcon}>
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-        </svg>
-      </div>
-      <div className={styles.premiumBannerText}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className={styles.premiumBannerTitle}>
-            {isActive ? 'Zeeble Premium' : 'Upgrade to Premium'}
-          </div>
-          {isActive && (
-            <span style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.6px',
-              textTransform: 'uppercase',
-              background: 'rgba(74, 222, 128, 0.18)',
-              color: '#4ade80',
-              border: '1px solid rgba(74, 222, 128, 0.35)',
-              borderRadius: 4,
-              padding: '2px 7px',
-            }}>Active</span>
-          )}
-        </div>
-        <div className={styles.premiumBannerSub}>
-          {isActive
-            ? 'You have an active Premium subscription.'
-            : 'Unlock exclusive features and support Zeeble.'}
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className={styles.tabContent}>
-      {banner}
-
-      {/* ── Already premium ── */}
-      {isPremium ? (
-        <>
-          <div className={styles.sectionTitle} style={{ marginTop: 4 }}>Your benefits</div>
-          {perksList}
-        </>
-
-      /* ── Success screen after payment ── */
-      ) : step === 'success' ? (
-        <div style={{ textAlign: 'center', padding: '32px 0' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>Welcome to Zeeble Premium!</div>
-          <div style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: 13 }}>
-            Your subscription is active. Enjoy all Premium features.
-          </div>
-        </div>
-
-      /* ── Card payment form ── */
-      ) : step === 'card' ? (
-        <div className={styles.stripeWrap}>
-          <div className={styles.sectionTitle} style={{ marginBottom: 12 }}>Payment details</div>
-          <div className={styles.stripeForm}>
-            <div ref={cardRef} className={styles.cardElement} />
-            {cardError && <div className={styles.errorMsg}>{cardError}</div>}
-            <button
-              className={styles.premiumUpgradeBtn}
-              onClick={handlePay}
-              disabled={loadingPay || !cardElement}
-            >
-              {loadingPay ? 'Processing…' : '✦ Pay $4.99/mo'}
-            </button>
-            <button
-              className={styles.ghostBtn}
-              onClick={() => setStep('plans')}
-              style={{ marginTop: 8, width: '100%' }}
-              disabled={loadingPay}
-            >
-              ← Back
-            </button>
-          </div>
-        </div>
-
-      /* ── Plans / upgrade prompt ── */
-      ) : (
-        <>
-          <div className={styles.sectionTitle} style={{ marginTop: 20 }}>What you get</div>
-          {perksList}
-          {subscribeError && <div className={styles.errorMsg}>{subscribeError}</div>}
-          <button
-            className={styles.premiumUpgradeBtn}
-            onClick={handleGetPremium}
-            disabled={loadingSubscribe}
-          >
-            {loadingSubscribe ? 'Preparing checkout…' : '✦ Get Zeeble Premium — $4.99/mo'}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ── Appearance tab ──────────────────────────────────────────────────────────────
 
 const ACCENT_COLORS = [
@@ -1730,6 +1540,20 @@ function AppearanceTab() {
   const [accent, setAccent] = useState(localStorage.getItem('zeeble_accent') ?? '#6366f1');
   const [fontSize, setFontSize] = useState(localStorage.getItem('zeeble_font_size') ?? 'normal');
   const [density, setDensity] = useState(localStorage.getItem('zeeble_density') ?? 'cozy');
+  const [reduceMotion,   setReduceMotion]   = usePref('a11y_reduce_motion', false);
+  const [highContrast,   setHighContrast]   = usePref('a11y_high_contrast', false);
+  const [largeTargets,   setLargeTargets]   = usePref('a11y_large_targets', false);
+  const [spellcheck,     setSpellcheck]     = usePref('a11y_spellcheck', true);
+  const [showTimestamps, setShowTimestamps] = usePref('a11y_timestamps', true);
+  const [gifAutoplay,    setGifAutoplay]    = usePref('a11y_gif_autoplay', true);
+  const [animatedEmoji,  setAnimatedEmoji]  = usePref('a11y_animated_emoji', true);
+
+  function applyA11y(rm: boolean, hc: boolean, lt: boolean) {
+    applyAccessibility(rm, hc, lt);
+    localStorage.setItem('a11y_reduce_motion', String(rm));
+    localStorage.setItem('a11y_high_contrast', String(hc));
+    localStorage.setItem('a11y_large_targets', String(lt));
+  }
 
   function handleAccent(color: { value: string; hover: string }) {
     setAccent(color.value);
@@ -1830,6 +1654,41 @@ return (
           </div>
         </div>
       </div>
+
+      <div className={styles.voiceDivider} />
+
+      <div className={styles.sectionTitle}>Accessibility</div>
+
+      <div className={styles.sectionTitle}>Motion & Animation</div>
+      <SettingRow label="Reduce motion" sub="Disable transitions and animations throughout the app">
+        <NeuToggle value={reduceMotion} onChange={v => { setReduceMotion(v); applyA11y(v, highContrast, largeTargets); }} />
+      </SettingRow>
+      <SettingRow label="Autoplay GIFs" sub="Animate GIFs while browsing (disable to save resources)">
+        <NeuToggle value={gifAutoplay} onChange={setGifAutoplay} />
+      </SettingRow>
+      <SettingRow label="Animated emoji" sub="Show animated versions of emoji">
+        <NeuToggle value={animatedEmoji} onChange={setAnimatedEmoji} />
+      </SettingRow>
+
+      <div className={styles.voiceDivider} />
+
+      <div className={styles.sectionTitle}>Display</div>
+      <SettingRow label="High contrast" sub="Increase contrast for better readability">
+        <NeuToggle value={highContrast} onChange={v => { setHighContrast(v); applyA11y(reduceMotion, v, largeTargets); }} />
+      </SettingRow>
+      <SettingRow label="Larger click targets" sub="Make buttons and interactive elements bigger">
+        <NeuToggle value={largeTargets} onChange={v => { setLargeTargets(v); applyA11y(reduceMotion, highContrast, v); }} />
+      </SettingRow>
+      <SettingRow label="Always show timestamps" sub="Show time on every message instead of on hover">
+        <NeuToggle value={showTimestamps} onChange={setShowTimestamps} />
+      </SettingRow>
+
+      <div className={styles.voiceDivider} />
+
+      <div className={styles.sectionTitle}>Text Input</div>
+      <SettingRow label="Spellcheck" sub="Underline misspelled words in the message box">
+        <NeuToggle value={spellcheck} onChange={setSpellcheck} />
+      </SettingRow>
 
     </div>
   );
@@ -1959,7 +1818,7 @@ function NotificationsTab() {
   );
 }
 
-// ── Accessibility tab ─────────────────────────────────────────────────────────
+// ── Accessibility helpers ─────────────────────────────────────────────────────
 
 function applyAccessibility(reduceMotion: boolean, highContrast: boolean, largeTargets: boolean) {
   const root = document.documentElement;
@@ -1979,63 +1838,6 @@ function applyAccessibility(reduceMotion: boolean, highContrast: boolean, largeT
   const lt = localStorage.getItem('a11y_large_targets') === 'true';
   applyAccessibility(rm, hc, lt);
 })();
-
-function AccessibilityTab() {
-  const [reduceMotion,  setReduceMotion]  = usePref('a11y_reduce_motion', false);
-  const [highContrast,  setHighContrast]  = usePref('a11y_high_contrast', false);
-  const [largeTargets,  setLargeTargets]  = usePref('a11y_large_targets', false);
-  const [spellcheck,    setSpellcheck]    = usePref('a11y_spellcheck', true);
-  const [showTimestamps, setShowTimestamps] = usePref('a11y_timestamps', true);
-  const [gifAutoplay,   setGifAutoplay]   = usePref('a11y_gif_autoplay', true);
-  const [animatedEmoji, setAnimatedEmoji] = usePref('a11y_animated_emoji', true);
-
-  function apply(rm: boolean, hc: boolean, lt: boolean) {
-    applyAccessibility(rm, hc, lt);
-    localStorage.setItem('a11y_reduce_motion', String(rm));
-    localStorage.setItem('a11y_high_contrast', String(hc));
-    localStorage.setItem('a11y_large_targets', String(lt));
-  }
-
-  return (
-    <div className={styles.tabContent}>
-
-      <div className={styles.sectionTitle}>Motion & Animation</div>
-
-      <SettingRow label="Reduce motion" sub="Disable transitions and animations throughout the app">
-        <NeuToggle value={reduceMotion} onChange={v => { setReduceMotion(v); apply(v, highContrast, largeTargets); }} />
-      </SettingRow>
-      <SettingRow label="Autoplay GIFs" sub="Animate GIFs while browsing (disable to save resources)">
-        <NeuToggle value={gifAutoplay} onChange={setGifAutoplay} />
-      </SettingRow>
-      <SettingRow label="Animated emoji" sub="Show animated versions of emoji">
-        <NeuToggle value={animatedEmoji} onChange={setAnimatedEmoji} />
-      </SettingRow>
-
-      <div className={styles.voiceDivider} />
-
-      <div className={styles.sectionTitle}>Display</div>
-
-      <SettingRow label="High contrast" sub="Increase contrast for better readability">
-        <NeuToggle value={highContrast} onChange={v => { setHighContrast(v); apply(reduceMotion, v, largeTargets); }} />
-      </SettingRow>
-      <SettingRow label="Larger click targets" sub="Make buttons and interactive elements bigger">
-        <NeuToggle value={largeTargets} onChange={v => { setLargeTargets(v); apply(reduceMotion, highContrast, v); }} />
-      </SettingRow>
-      <SettingRow label="Always show timestamps" sub="Show time on every message instead of on hover">
-        <NeuToggle value={showTimestamps} onChange={setShowTimestamps} />
-      </SettingRow>
-
-      <div className={styles.voiceDivider} />
-
-      <div className={styles.sectionTitle}>Text Input</div>
-
-      <SettingRow label="Spellcheck" sub="Underline misspelled words in the message box">
-        <NeuToggle value={spellcheck} onChange={setSpellcheck} />
-      </SettingRow>
-
-    </div>
-  );
-}
 
 // ── Dev tab ────────────────────────────────────────────────────────────────────
 
@@ -2352,6 +2154,120 @@ function VoiceTab() {
   );
 }
 
+// ── ConnectionsTab ────────────────────────────────────────────────────────────
+
+type ProviderStatus = 'idle' | 'waiting' | 'linked' | 'error';
+
+function ConnectionsTab() {
+  const [discordStatus, setDiscordStatus] = useState<ProviderStatus>('idle');
+  const [steamStatus,   setSteamStatus]   = useState<ProviderStatus>('idle');
+  const [discordLinked, setDiscordLinked] = useState(false);
+  const [steamLinked,   setSteamLinked]   = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load current connection status
+  useEffect(() => {
+    getAccountInfo().then(info => {
+      if (!info) return;
+      setDiscordLinked(info.discord_linked ?? false);
+      setSteamLinked(info.steam_linked ?? false);
+    });
+  }, []);
+
+  const stopPoll = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const startOAuth = async (provider: OAuthProvider) => {
+    const setStatus = provider === 'discord' ? setDiscordStatus : setSteamStatus;
+    const setLinked = provider === 'discord' ? setDiscordLinked : setSteamLinked;
+
+    setStatus('waiting');
+    const result = await oauthStart(provider);
+    if (!result) { setStatus('error'); return; }
+
+    // Open in system browser (Tauri) or new tab (web)
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(result.url);
+    } catch {
+      window.open(result.url, '_blank');
+    }
+
+    // Poll until ready or expired
+    stopPoll();
+    const { state } = result;
+    pollRef.current = setInterval(async () => {
+      const poll = await oauthPoll(state);
+      if (poll.error) {
+        stopPoll();
+        setStatus('error');
+        setTimeout(() => setStatus('idle'), 4000);
+      } else if (poll.ready) {
+        stopPoll();
+        setStatus('linked');
+        setLinked(true);
+        if (poll.token && poll.uid && poll.beam_identity) {
+          saveSession({ token: poll.token, beam_identity: poll.beam_identity, uid: poll.uid, refresh_token: poll.refresh_token });
+        }
+      }
+    }, 2500);
+  };
+
+  const unlinkProvider = async (provider: OAuthProvider) => {
+    const setStatus = provider === 'discord' ? setDiscordStatus : setSteamStatus;
+    const setLinked = provider === 'discord' ? setDiscordLinked : setSteamLinked;
+    await oauthUnlink(provider);
+    setLinked(false);
+    setStatus('idle');
+  };
+
+  useEffect(() => () => stopPoll(), []);
+
+  const providerRow = (
+    provider: OAuthProvider,
+    label: string,
+    linked: boolean,
+    status: ProviderStatus,
+  ) => {
+    const sub = status === 'waiting'
+      ? 'Waiting for sign-in in browser…'
+      : status === 'error'
+        ? 'Connection failed. Please try again.'
+        : linked ? 'Connected' : 'Not connected';
+
+    return (
+      <div key={provider} className={styles.settingRow}>
+        <div className={styles.settingRowText}>
+          <span className={styles.settingRowLabel}>{label}</span>
+          <span className={styles.settingRowSub}
+            style={status === 'error' ? { color: 'var(--error, #f44)' } : linked ? { color: 'var(--accent)' } : undefined}>
+            {sub}
+          </span>
+        </div>
+        {linked
+          ? <button className={styles.saveBtn} onClick={() => unlinkProvider(provider)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)' }}>Unlink</button>
+          : <button className={styles.saveBtn} onClick={() => startOAuth(provider)} disabled={status === 'waiting'}>{status === 'waiting' ? '…' : 'Connect'}</button>
+        }
+      </div>
+    );
+  };
+
+  return (
+    <div className={styles.tabContent}>
+
+      <div className={styles.sectionTitle}>Account Sign In</div>
+      <p style={{ fontSize: 13, color: 'var(--text-muted, rgba(255,255,255,0.45))', margin: '-8px 0 0' }}>
+        Link accounts to find friends and sign in from other platforms.
+      </p>
+
+      {providerRow('discord', 'Discord', discordLinked, discordStatus)}
+      {providerRow('steam',   'Steam',   steamLinked,   steamStatus)}
+
+    </div>
+  );
+}
+
 // ── Main AccountModal ──────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] = [
@@ -2372,6 +2288,16 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
       </svg>
     ),
   },
@@ -2400,37 +2326,12 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
     ),
   },
   {
-    id: 'subaccounts',
-    label: 'Sub-accounts',
+    id: 'notifications',
+    label: 'Notifications',
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-        <circle cx="9" cy="7" r="4"/>
-        <line x1="19" y1="8" x2="19" y2="14"/>
-        <line x1="22" y1="11" x2="16" y2="11"/>
-      </svg>
-    ),
-  },
-  {
-    id: 'promo',
-    label: 'Redeem Code',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M20 12V22H4V12"/>
-        <path d="M22 7H2v5h20V7z"/>
-        <path d="M12 22V7"/>
-        <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
-        <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
-      </svg>
-    ),
-  },
-  {
-    id: 'premium',
-    label: 'Premium',
-    gold: true,
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
       </svg>
     ),
   },
@@ -2446,28 +2347,6 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
     ),
   },
   {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-      </svg>
-    ),
-  },
-  {
-    id: 'accessibility',
-    label: 'Accessibility',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
-        <line x1="9" y1="9" x2="9.01" y2="9"/>
-        <line x1="15" y1="9" x2="15.01" y2="9"/>
-      </svg>
-    ),
-  },
-  {
     id: 'voice',
     label: 'Voice & Video',
     icon: (
@@ -2476,6 +2355,18 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
         <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
         <line x1="12" y1="19" x2="12" y2="23"/>
         <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    ),
+  },
+  {
+    id: 'subaccounts',
+    label: 'Sub-accounts',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <line x1="19" y1="8" x2="19" y2="14"/>
+        <line x1="22" y1="11" x2="16" y2="11"/>
       </svg>
     ),
   },
@@ -2565,13 +2456,11 @@ export default function AccountModal({ onClose, onLogout, onDm, onSwitchServer, 
             {activeTab === 'friends'     && <FriendsTab onDm={onDm ? b => { onDm(b); onClose(); } : undefined} />}
             {activeTab === 'servers'     && <ServersTab onSwitchServer={onSwitchServer ? (u, n) => { onSwitchServer(u, n); onClose(); } : undefined} />}
             {activeTab === 'subaccounts' && <SubaccountsTab />}
-            {activeTab === 'promo'       && <PromoTab />}
-            {activeTab === 'premium'     && <PremiumTab />}
-            {activeTab === 'appearance'     && <AppearanceTab />}
-            {activeTab === 'notifications'  && <NotificationsTab />}
-            {activeTab === 'accessibility'  && <AccessibilityTab />}
-            {activeTab === 'voice'          && <VoiceTab />}
+            {activeTab === 'appearance'  && <AppearanceTab />}
+            {activeTab === 'notifications' && <NotificationsTab />}
+            {activeTab === 'voice'         && <VoiceTab />}
             {activeTab === 'dev'            && <DevTab onOpenDevPanel={onOpenDevPanel} />}
+            {activeTab === 'connections'    && <ConnectionsTab />}
           </div>
         </div>
       </div>

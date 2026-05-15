@@ -1,20 +1,10 @@
-/**
- * Tenor GIF picker component.
- * Provides searchable GIF selection from Tenor API.
- * Shows trending GIFs by default, with search functionality.
- */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { GiphyFetch } from '@giphy/js-fetch-api';
 import styles from './TenorPicker.module.css';
-import { ENV_TENOR_KEY } from '../config';
 
-/** Fallback Tenor API key if none configured */
-const DEFAULT_KEY = ENV_TENOR_KEY || 'LIVDSRZULELA';
+const gf = new GiphyFetch('rvm0CMEavRSoTZuWu7bcoNYyVjZpynLo');
 
-function getTenorKey(): string {
-  return localStorage.getItem('tenor_api_key') || DEFAULT_KEY;
-}
-
-interface TenorResult {
+interface GifResult {
   id: string;
   title: string;
   gifUrl: string;
@@ -23,32 +13,19 @@ interface TenorResult {
   previewHeight: number;
 }
 
-function parseTenorResults(results: unknown[]): TenorResult[] {
-  return results.map((r: unknown) => {
-    const result = r as Record<string, unknown>;
-    const mediaArr = result.media as Record<string, unknown>[];
-    const media = mediaArr?.[0] ?? {};
-    const gif = media.gif as Record<string, unknown> | undefined;
-    const tinygif = media.tinygif as Record<string, unknown> | undefined;
-    const dims = (tinygif?.dims as number[]) ?? [100, 100];
-    return {
-      id: result.id as string,
-      title: result.title as string,
-      gifUrl: gif?.url as string,
-      previewUrl: (tinygif?.url ?? gif?.url) as string,
-      previewWidth: dims[0],
-      previewHeight: dims[1],
-    };
-  }).filter(r => r.gifUrl && r.previewUrl);
-}
+async function fetchGifs(q?: string): Promise<GifResult[]> {
+  const { data } = q?.trim()
+    ? await gf.search(q.trim(), { limit: 24, rating: 'g' })
+    : await gf.trending({ limit: 24, rating: 'g' });
 
-async function fetchTenor(endpoint: string, params: Record<string, string>): Promise<TenorResult[]> {
-  const key = getTenorKey();
-  const qs = new URLSearchParams({ key, limit: '24', media_filter: 'minimal', ...params });
-  const res = await fetch(`https://api.tenor.com/v1/${endpoint}?${qs}`);
-  if (!res.ok) return [];
-  const data = await res.json() as { results?: unknown[] };
-  return parseTenorResults(data.results ?? []);
+  return data.map(gif => ({
+    id: gif.id as string,
+    title: gif.title,
+    gifUrl: gif.images.original.url,
+    previewUrl: gif.images.fixed_width_downsampled?.url ?? gif.images.original.url,
+    previewWidth: Number(gif.images.fixed_width_downsampled?.width ?? 200),
+    previewHeight: Number(gif.images.fixed_width_downsampled?.height ?? 150),
+  }));
 }
 
 interface Props {
@@ -57,22 +34,18 @@ interface Props {
 
 export default function TenorPicker({ onSelect }: Props) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<TenorResult[]>([]);
+  const [results, setResults] = useState<GifResult[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (q: string) => {
     setLoading(true);
-    const data = q.trim()
-      ? await fetchTenor('search', { q: q.trim() })
-      : await fetchTenor('trending', {});
+    const data = await fetchGifs(q || undefined);
     setResults(data);
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load('');
-  }, [load]);
+  useEffect(() => { load(''); }, [load]);
 
   function handleQuery(e: React.ChangeEvent<HTMLInputElement>) {
     const q = e.target.value;
@@ -92,16 +65,12 @@ export default function TenorPicker({ onSelect }: Props) {
           autoFocus
           autoComplete="off"
         />
-        <span className={styles.powered}>via Tenor</span>
+        <span className={styles.powered}>via GIPHY</span>
       </div>
 
       <div className={styles.grid}>
-        {loading && results.length === 0 && (
-          <div className={styles.empty}>Loading…</div>
-        )}
-        {!loading && results.length === 0 && (
-          <div className={styles.empty}>No results.</div>
-        )}
+        {loading && results.length === 0 && <div className={styles.empty}>Loading…</div>}
+        {!loading && results.length === 0 && <div className={styles.empty}>No results.</div>}
         {results.map(r => (
           <button
             key={r.id}
@@ -110,12 +79,7 @@ export default function TenorPicker({ onSelect }: Props) {
             title={r.title}
             style={{ aspectRatio: `${r.previewWidth} / ${r.previewHeight}` }}
           >
-            <img
-              src={r.previewUrl}
-              alt={r.title}
-              loading="lazy"
-              className={styles.gifImg}
-            />
+            <img src={r.previewUrl} alt={r.title} loading="lazy" className={styles.gifImg} />
           </button>
         ))}
       </div>

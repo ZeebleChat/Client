@@ -1,40 +1,28 @@
 /**
  * Overlay for displaying remote screen shares during voice calls.
- * Shows live video feeds from participants sharing their screen.
+ * Renders base64 JPEG frames pushed from the server at ~15 fps.
  * Can be minimized to show only a header with live indicator.
  */
-import { useEffect, useRef, useState } from 'react';
-import type { RemoteScreen } from '../hooks/useVoice';
+import { useState } from 'react';
 import styles from './ScreenShareOverlay.module.css';
 
-function ScreenVideo({ screen }: { screen: RemoteScreen }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.srcObject = screen.stream;
-  }, [screen.stream]);
-  return (
-    <div className={styles.screenItem}>
-      <div className={styles.screenLabel}>{screen.identity} is sharing</div>
-      <video ref={ref} autoPlay playsInline className={styles.video} />
-    </div>
-  );
-}
-
 interface Props {
-  screens: RemoteScreen[];
+  frames: Map<string, string>; // identity → latest base64 JPEG
 }
 
-export default function ScreenShareOverlay({ screens }: Props) {
+export default function ScreenShareOverlay({ frames }: Props) {
   const [minimized, setMinimized] = useState(false);
 
-  if (screens.length === 0) return null;
+  if (frames.size === 0) return null;
+
+  const entries = Array.from(frames.entries());
 
   return (
     <div className={`${styles.overlay} ${minimized ? styles.minimized : ''}`}>
       <div className={styles.header}>
         <span className={styles.liveTag}>LIVE</span>
         <span className={styles.headerText}>
-          {screens.length === 1 ? screens[0].identity : `${screens.length} screens`}
+          {entries.length === 1 ? entries[0][0] : `${entries.length} screens`}
         </span>
         <button className={styles.minimizeBtn} onClick={() => setMinimized(m => !m)}>
           {minimized ? '▲' : '▼'}
@@ -42,7 +30,16 @@ export default function ScreenShareOverlay({ screens }: Props) {
       </div>
       {!minimized && (
         <div className={styles.screenList}>
-          {screens.map(s => <ScreenVideo key={s.identity} screen={s} />)}
+          {entries.map(([identity, frame]) => (
+            <div key={identity} className={styles.screenItem}>
+              <div className={styles.screenLabel}>{identity} is sharing</div>
+              <img
+                src={`data:image/jpeg;base64,${frame}`}
+                alt={`${identity}'s screen`}
+                className={styles.video}
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>

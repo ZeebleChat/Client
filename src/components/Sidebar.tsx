@@ -12,7 +12,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import type { SidebarCategory } from '../types';
 import type { ApiChannel } from '../api';
 import type { Participant } from '../hooks/useVoice';
-import { createChannel, updateCategory, deleteCategory, updateChannelPosition, renameChannel, deleteChannel, loginReq } from '../api';
+import { createChannel, updateCategory, deleteCategory, updateChannelPosition, renameChannel, deleteChannel, loginReq, getServerAttachmentUrl } from '../api';
+import { getServerUrl } from '../config';
 import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
 import styles from './Sidebar.module.css';
@@ -28,6 +29,9 @@ interface Props {
   onSelectChannel: (channel: ApiChannel) => void;
   onJoinVoice: (channel: ApiChannel) => void;
   onLeaveVoice?: () => void;
+  liveStreamChannels?: Map<string, string>;
+  onStartStream?: (channel: ApiChannel) => void;
+  onJoinStream?: (channel: ApiChannel) => void;
   voiceMuted?: boolean;
   voiceDeafened?: boolean;
   onToggleMute?: () => void;
@@ -43,6 +47,8 @@ interface Props {
   isCloudServer?: boolean;
   onLeaveServer?: () => Promise<{ ok: boolean; error?: string }>;
   onDeleteServer?: (password: string) => Promise<{ ok: boolean; error?: string }>;
+  mobileOpen?: boolean;
+  bannerAttachmentId?: number | null;
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -102,6 +108,7 @@ function AddChannelPopover({
   const [name, setName] = useState('');
   const [type, setType] = useState<'text' | 'voice' | 'arena' | 'board'>('text');
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,9 +122,10 @@ function AddChannelPopover({
   async function submit() {
     if (!name.trim()) return;
     setBusy(true);
-    await createChannel(name.trim(), type, categoryId);
+    const r = await createChannel(name.trim(), type, categoryId);
     setBusy(false);
-    onDone();
+    if (r.ok) onDone();
+    else setErr(r.error ?? 'Failed to create channel');
   }
 
   return (
@@ -149,6 +157,7 @@ function AddChannelPopover({
         autoFocus
         onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
       />
+      {err && <div className={styles.settingsErr}>{err}</div>}
       <div className={styles.addPopoverActions}>
         <button className={styles.cancelBtn} onClick={onCancel}>Cancel</button>
         <button className={styles.addBtn} onClick={submit} disabled={busy || !name.trim()}>
@@ -492,11 +501,13 @@ export default function Sidebar({
   serverName, categories, activeChannelId, activeVoiceChannelId, activeVoiceChannelName,
   voiceParticipants, voiceRoomParticipants,
   onSelectChannel, onJoinVoice, onLeaveVoice,
+  liveStreamChannels, onStartStream, onJoinStream,
   voiceMuted, voiceDeafened, onToggleMute, onToggleDeafen,
   onOpenServerSettings, onOpenInvites, onRefresh,
   onToggleScreenShare, isScreenSharing,
   voiceStatus, voiceErrorMsg,
   isOwner, isCloudServer, onLeaveServer, onDeleteServer,
+  mobileOpen, bannerAttachmentId,
 }: Props) {
   const identity = getBeamIdentity();
 
@@ -518,7 +529,7 @@ export default function Sidebar({
     setLeaveLoading(true);
     setLeaveError('');
     if (isOwner && onDeleteServer) {
-      const loginResult = await loginReq(identity ?? '', leavePassword);
+      const loginResult = await loginReq(identity ?? '', leavePassword, false);
       if (!loginResult.ok) {
         setLeaveError('Incorrect password');
         setLeaveLoading(false);
@@ -720,7 +731,18 @@ export default function Sidebar({
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <aside className={styles.sidebar}>
+    <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.mobileOpen}` : ''}`}>
+      {/* Server banner */}
+      {bannerAttachmentId && (
+        <div className={styles.banner}>
+          <img
+            src={getServerAttachmentUrl(getServerUrl(), bannerAttachmentId)}
+            alt=""
+            className={styles.bannerImg}
+            onError={e => { (e.target as HTMLImageElement).closest('.' + styles.banner)?.remove(); }}
+          />
+        </div>
+      )}
       {/* Header */}
       <div className={styles.header}>
         <span className={styles.serverTitle}>{serverName}</span>
@@ -890,6 +912,8 @@ export default function Sidebar({
                   const settingsOpen = String(chSettings) === String(ch.id);
                   const polledIdentities = voiceRoomParticipants?.[String(ch.id)] ?? [];
                   const hasPolledUsers = polledIdentities.length > 0;
+                  const streamBroadcaster = liveStreamChannels?.get(String(ch.id));
+                  const hasStream = !!streamBroadcaster;
                   return (
                     <div key={ch.id} className={styles.chItemWrap}>
                     <div
@@ -907,8 +931,32 @@ export default function Sidebar({
                         <MicIcon />
                         <span style={{ flex: 1 }}>{ch.name}</span>
                         {isActiveVoice && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>LIVE</span>}
+                        {hasStream && (
+                          <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3 }}>
+                            ● STREAM
+                          </span>
+                        )}
                         {!isActiveVoice && hasPolledUsers && (
                           <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>{polledIdentities.length}</span>
+                        )}
+                        {hasStream && (
+                          <button
+                            className={styles.chGearBtn}
+                            title="Join stream"
+                            onClick={e => { e.stopPropagation(); onJoinStream?.(ch); }}
+                            style={{ color: 'var(--red)' }}
+                          >
+                            ▶
+                          </button>
+                        )}
+                        {!hasStream && onStartStream && (
+                          <button
+                            className={styles.chGearBtn}
+                            title="Go live"
+                            onClick={e => { e.stopPropagation(); onStartStream(ch); }}
+                          >
+                            ◉
+                          </button>
                         )}
                         <button
                           className={styles.chGearBtn}
@@ -1209,8 +1257,8 @@ export default function Sidebar({
           onRename={() => { setChSettings(ctxMenu.ch.id); setCatSettings(null); }}
           onDelete={async () => {
             if (!confirm(`Delete channel "${ctxMenu.ch.name}"? This cannot be undone.`)) return;
-            await deleteChannel(ctxMenu.ch.id);
-            onRefresh?.();
+            const r = await deleteChannel(ctxMenu.ch.id);
+            if (r.ok) { setCtxMenu(null); onRefresh?.(); }
           }}
           onClose={() => setCtxMenu(null)}
         />

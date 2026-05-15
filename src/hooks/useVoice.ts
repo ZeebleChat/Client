@@ -1,41 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
-import { getServerUrl } from '../config';
-import { getChatToken } from '../auth';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getChatToken } from '../auth';
+import { getServerUrl } from '../config';
+import { getBeamIdentity } from '../auth';
 import type { ApiChannel } from '../api';
 
 const MIC_LEVEL_MULTIPLIER = 400;
 const MIC_METER_INTERVAL_MS = 80;
-const VOICE_TOKEN_RETRY_DELAY_MS = 800;
-
-// LiveKit types from the UMD bundle loaded in index.html
-declare global {
-  interface Window {
-    LivekitClient: {
-      Room: new () => LiveKitRoom;
-      RoomEvent: Record<string, string>;
-      LocalAudioTrack: new (track: MediaStreamTrack) => unknown;
-      LocalVideoTrack: new (track: MediaStreamTrack) => unknown;
-      createLocalScreenTracks: (opts?: { audio?: boolean }) => Promise<Array<{ mediaStreamTrack: MediaStreamTrack; stop(): void }>>;
-    };
-  }
-}
-
-interface LiveKitRoom {
-  connect(url: string, token: string): Promise<void>;
-  startAudio(): Promise<void>;
-  disconnect(): void;
-  localParticipant: { publishTrack(track: unknown): Promise<void> };
-  remoteParticipants: Map<string, LiveKitParticipant>;
-  activeSpeakers: LiveKitParticipant[];
-  on(event: string, cb: (...args: unknown[]) => void): void;
-}
-
-interface LiveKitParticipant {
-  identity: string;
-  name?: string;
-  audioTrackPublications: Map<string, { isMuted: boolean }>;
-}
 
 export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -44,11 +16,6 @@ export interface Participant {
   name: string;
   isMuted: boolean;
   isSpeaking: boolean;
-}
-
-export interface RemoteScreen {
-  identity: string;
-  stream: MediaStream;
 }
 
 export interface VoiceState {
@@ -62,7 +29,6 @@ export interface VoiceState {
   isDeafened: boolean;
   isScreenSharing: boolean;
   showScreenPicker: boolean;
-  remoteScreens: RemoteScreen[];
 }
 
 const INITIAL: VoiceState = {
@@ -76,22 +42,37 @@ const INITIAL: VoiceState = {
   isDeafened: false,
   isScreenSharing: false,
   showScreenPicker: false,
-  remoteScreens: [],
 };
+
+interface ParticipantDecoder {
+  decoder: AudioDecoder;
+  nextPlayTime: number;
+}
+
+// Safe base64 encode for binary data of any length.
+function toBase64(bytes: Uint8Array): string {
+  let str = '';
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    str += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(str);
+}
 
 export function useVoice() {
   const [state, setState] = useState<VoiceState>(INITIAL);
   const stateRef = useRef<VoiceState>(INITIAL);
-  const roomRef = useRef<LiveKitRoom | null>(null);
-  const localTrackRef = useRef<unknown>(null);
-  const micTrackRef = useRef<MediaStreamTrack | null>(null);
+
+  const sendRef = useRef<((msg: Record<string, unknown>) => void) | null>(null);
+  const unlistenRef = useRef<UnlistenFn | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const encoderRef = useRef<AudioEncoder | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
   const micIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioElemsRef = useRef<HTMLAudioElement[]>([]);
+  const decodersRef = useRef<Map<string, ParticipantDecoder>>(new Map());
+  const isDeafenedRef = useRef(false);
   const connGenRef = useRef(0);
-  const screenTrackRef = useRef<{ mediaStreamTrack: MediaStreamTrack; stop(): void } | null>(null);
-  const screenUnlistenRef = useRef<(() => void) | null>(null);
-  const screenCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const remoteScreenTracksRef = useRef<Array<{ identity: string; nativeTrack: MediaStreamTrack; stream: MediaStream }>>([]);
 
   function set(patch: Partial<VoiceState>) {
     setState(prev => {
@@ -109,41 +90,18 @@ export function useVoice() {
     set({ micLevel: 0, micSilent: false });
   }
 
-  function detachRemoteAudio() {
-    audioElemsRef.current.forEach(el => el.remove());
-    audioElemsRef.current = [];
-  }
-
-  function detachRemoteScreens() {
-    remoteScreenTracksRef.current = [];
-  }
-
-  function buildParticipants(room: LiveKitRoom): Participant[] {
-    const speakers = new Set((room.activeSpeakers ?? []).map(p => p.identity));
-    return Array.from(room.remoteParticipants.values()).map(p => {
-      const pubs = [...(p.audioTrackPublications?.values() ?? [])];
-      const isMuted = pubs.length === 0 || pubs.every(pub => pub.isMuted);
-      return {
-        identity: p.identity,
-        name: p.name || p.identity,
-        isMuted,
-        isSpeaking: speakers.has(p.identity),
-      };
-    });
-  }
-
   function startMicMeter(stream: MediaStream) {
     stopMicMeter();
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
     try {
-      const ctx = new AudioContext();
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
       const data = new Uint8Array(analyser.frequencyBinCount);
       let silentTicks = 0;
-      const SILENCE_THRESHOLD_TICKS = Math.ceil(5000 / MIC_METER_INTERVAL_MS);
-
+      const SILENCE_THRESHOLD = Math.ceil(5000 / MIC_METER_INTERVAL_MS);
       micIntervalRef.current = setInterval(() => {
         analyser.getByteTimeDomainData(data);
         let sum = 0;
@@ -151,13 +109,11 @@ export function useVoice() {
           const v = (data[i] - 128) / 128;
           sum += v * v;
         }
-        const rms = Math.sqrt(sum / data.length);
-        const level = Math.min(100, Math.round(rms * MIC_LEVEL_MULTIPLIER));
+        const level = Math.min(100, Math.round(Math.sqrt(sum / data.length) * MIC_LEVEL_MULTIPLIER));
         set({ micLevel: level });
-
         if (level === 0) {
           silentTicks++;
-          if (silentTicks >= SILENCE_THRESHOLD_TICKS) set({ micSilent: true });
+          if (silentTicks >= SILENCE_THRESHOLD) set({ micSilent: true });
         } else {
           silentTicks = 0;
           set({ micSilent: false });
@@ -166,17 +122,169 @@ export function useVoice() {
     } catch { /* non-fatal */ }
   }
 
-  const join = useCallback(async (channel: ApiChannel) => {
-    if (stateRef.current.status === 'connected' && stateRef.current.channel?.id === channel.id) return;
-    if (stateRef.current.status === 'connecting') return;
-    if (roomRef.current) await leave();
-    const gen = ++connGenRef.current;
+  function cleanupDecoders() {
+    for (const { decoder } of decodersRef.current.values()) {
+      try { decoder.close(); } catch { /* ignore */ }
+    }
+    decodersRef.current.clear();
+  }
 
-    if (!window.LivekitClient) {
-      set({ status: 'error', errorMsg: 'LiveKit SDK not loaded', channel });
-      return;
+  function getOrCreateDecoder(identity: string): ParticipantDecoder {
+    const existing = decodersRef.current.get(identity);
+    if (existing) return existing;
+
+    const ctx = audioCtxRef.current!;
+    const decoder = new AudioDecoder({
+      output: (audioData: AudioData) => {
+        if (isDeafenedRef.current) { audioData.close(); return; }
+        try {
+          const buffer = ctx.createBuffer(
+            audioData.numberOfChannels,
+            audioData.numberOfFrames,
+            audioData.sampleRate,
+          );
+          for (let i = 0; i < audioData.numberOfChannels; i++) {
+            audioData.copyTo(buffer.getChannelData(i), { planeIndex: i });
+          }
+          audioData.close();
+
+          const entry = decodersRef.current.get(identity);
+          if (!entry) return;
+          const now = ctx.currentTime;
+          // Reset play cursor if we've fallen behind (gap or first frame).
+          if (entry.nextPlayTime < now) entry.nextPlayTime = now + 0.05;
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          source.start(entry.nextPlayTime);
+          entry.nextPlayTime += buffer.duration;
+        } catch { /* ignore */ }
+      },
+      error: () => { /* drop silently */ },
+    });
+
+    decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 });
+    const entry: ParticipantDecoder = { decoder, nextPlayTime: 0 };
+    decodersRef.current.set(identity, entry);
+    return entry;
+  }
+
+  // Called from useWebSocket whenever a voice_audio frame arrives.
+  // Bypasses React state — must stay fast and allocation-light.
+  const handleVoiceAudio = useCallback((from: string, _channelId: string, base64data: string) => {
+    if (!audioCtxRef.current || stateRef.current.status !== 'connected') return;
+    if (from === getBeamIdentity()) return; // skip own echo
+    try {
+      const binary = atob(base64data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const { decoder } = getOrCreateDecoder(from);
+      decoder.decode(new EncodedAudioChunk({
+        type: 'key',
+        timestamp: performance.now() * 1000,
+        data: bytes,
+      }));
+    } catch { /* drop bad frame */ }
+  // stable — reads only refs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stores the latest JPEG frame per identity — updated directly to avoid
+  // triggering voiceState re-renders on every 15fps frame.
+  const remoteFramesRef = useRef<Map<string, string>>(new Map());
+  const [remoteFrames, setRemoteFrames] = useState<Map<string, string>>(new Map());
+
+  // Called from useWebSocket for every incoming stream_frame — bypasses voiceState.
+  const handleScreenFrame = useCallback((from: string, channelId: string, data: string) => {
+    const currentChannel = stateRef.current.channel;
+    if (!currentChannel || String(currentChannel.id) !== String(channelId)) return;
+    if (from === getBeamIdentity()) return;
+    const next = new Map(remoteFramesRef.current);
+    next.set(from, data);
+    remoteFramesRef.current = next;
+    setRemoteFrames(next);
+  // stable — reads only refs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Called from App.tsx when a voice_state WS event arrives.
+  const handleVoiceState = useCallback((event: {
+    channel_id: string;
+    identity: string;
+    action: 'join' | 'leave';
+  }) => {
+    const currentChannel = stateRef.current.channel;
+    if (!currentChannel || String(currentChannel.id) !== String(event.channel_id)) return;
+    if (event.identity === getBeamIdentity()) return; // don't list ourselves
+
+    setState(prev => {
+      const next = { ...prev };
+      if (event.action === 'join') {
+        if (prev.participants.some(p => p.identity === event.identity)) return prev;
+        next.participants = [
+          ...prev.participants,
+          { identity: event.identity, name: event.identity, isMuted: false, isSpeaking: false },
+        ];
+      } else {
+        try { decodersRef.current.get(event.identity)?.decoder.close(); } catch { /* ignore */ }
+        decodersRef.current.delete(event.identity);
+        next.participants = prev.participants.filter(p => p.identity !== event.identity);
+      }
+      stateRef.current = next;
+      return next;
+    });
+  // stable — reads only refs and decodersRef
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const leave = useCallback(async () => {
+    const ch = stateRef.current.channel;
+    if (ch && sendRef.current) {
+      sendRef.current({ type: 'voice_leave', channel_id: String(ch.id) });
+    }
+    // Stop screen capture if active
+    if (stateRef.current.isScreenSharing) {
+      invoke('stop_screen_capture').catch(() => {});
+      unlistenRef.current?.();
+      unlistenRef.current = null;
+    }
+    stopMicMeter();
+    cleanupDecoders();
+
+    workletNodeRef.current?.disconnect();
+    workletNodeRef.current = null;
+
+    if (encoderRef.current) {
+      try { encoderRef.current.close(); } catch { /* ignore */ }
+      encoderRef.current = null;
     }
 
+    micStreamRef.current?.getTracks().forEach(t => t.stop());
+    micStreamRef.current = null;
+
+    if (audioCtxRef.current) {
+      await audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+
+    sendRef.current = null;
+    remoteFramesRef.current = new Map();
+    setRemoteFrames(new Map());
+    setState(INITIAL);
+    stateRef.current = INITIAL;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const join = useCallback(async (
+    channel: ApiChannel,
+    sendFn: (msg: Record<string, unknown>) => void,
+  ) => {
+    if (stateRef.current.status === 'connected' && stateRef.current.channel?.id === channel.id) return;
+    if (stateRef.current.status === 'connecting') return;
+    if (stateRef.current.status !== 'idle') await leave();
+
+    sendRef.current = sendFn;
+    const gen = ++connGenRef.current;
     set({ status: 'connecting', channel, errorMsg: '', participants: [] });
 
     const serverUrl = getServerUrl();
@@ -186,219 +294,137 @@ export function useVoice() {
       return;
     }
 
+    // Request mic with preferred settings for voice chat.
     let micStream: MediaStream;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (connGenRef.current !== gen) return;
-      micTrackRef.current = micStream.getAudioTracks()[0];
-      localTrackRef.current = new window.LivekitClient.LocalAudioTrack(micTrackRef.current);
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      if (connGenRef.current !== gen) { micStream.getTracks().forEach(t => t.stop()); return; }
+      micStreamRef.current = micStream;
     } catch {
       if (connGenRef.current !== gen) return;
       set({ status: 'error', errorMsg: 'Microphone permission denied' });
       return;
     }
 
-    let voiceToken: string;
-    let livekitUrl: string;
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    audioCtxRef.current = ctx;
+
     try {
-      const fetchToken = () => fetch(
-        `${serverUrl}/v1/voice/token?channel_id=${encodeURIComponent(String(channel.id))}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      let res = await fetchToken();
-      if (res.status === 409) {
-        await new Promise(r => setTimeout(r, VOICE_TOKEN_RETRY_DELAY_MS));
-        res = await fetchToken();
-      }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-      }
-      if (connGenRef.current !== gen) return;
-      const data = await res.json();
-      voiceToken = data.token;
-      livekitUrl = data.livekit_url;
+      await ctx.audioWorklet.addModule('/mic-processor.js');
     } catch (e) {
       if (connGenRef.current !== gen) return;
-      set({ status: 'error', errorMsg: `Failed to get voice token: ${(e as Error).message}` });
+      set({ status: 'error', errorMsg: `AudioWorklet failed: ${(e as Error).message}` });
       return;
     }
 
-    const room = new window.LivekitClient.Room();
-    roomRef.current = room;
-    const RoomEvent = window.LivekitClient.RoomEvent;
-
-    room.on(RoomEvent.TrackSubscribed, (track: unknown, _pub: unknown, participant: unknown) => {
-      const t = track as { kind: string; attach(): HTMLMediaElement; mediaStreamTrack: MediaStreamTrack };
-      const p = participant as { identity: string };
-      if (t.kind === 'audio') {
-        const el = t.attach() as HTMLAudioElement;
-        el.dataset.livekitParticipant = p.identity;
-        document.body.appendChild(el);
-        audioElemsRef.current.push(el);
-      }
-      if (t.kind === 'video') {
-        const stream = new MediaStream([t.mediaStreamTrack]);
-        remoteScreenTracksRef.current.push({ identity: p.identity, nativeTrack: t.mediaStreamTrack, stream });
-        set({ remoteScreens: remoteScreenTracksRef.current.map(s => ({ identity: s.identity, stream: s.stream })) });
-      }
-    });
-
-    room.on(RoomEvent.TrackUnsubscribed, (track: unknown) => {
-      const t = track as { kind: string; detach(): HTMLMediaElement[]; mediaStreamTrack: MediaStreamTrack };
-      if (t.kind === 'audio') {
-        t.detach().forEach((el: HTMLMediaElement) => {
-          el.remove();
-          audioElemsRef.current = audioElemsRef.current.filter(e => e !== el);
+    const encoder = new AudioEncoder({
+      output: (chunk: EncodedAudioChunk) => {
+        if (stateRef.current.isMuted) return;
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        sendRef.current?.({
+          type: 'voice_audio',
+          channel_id: String(channel.id),
+          data: toBase64(data),
         });
-      }
-      if (t.kind === 'video') {
-        remoteScreenTracksRef.current = remoteScreenTracksRef.current.filter(s => s.nativeTrack !== t.mediaStreamTrack);
-        set({ remoteScreens: remoteScreenTracksRef.current.map(s => ({ identity: s.identity, stream: s.stream })) });
-      }
+      },
+      error: (e: Error) => console.error('AudioEncoder:', e),
     });
+    encoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: 32000 });
+    encoderRef.current = encoder;
 
-    const refreshParticipants = () => set({ participants: buildParticipants(room) });
-    room.on(RoomEvent.ParticipantConnected, refreshParticipants);
-    room.on(RoomEvent.ParticipantDisconnected, refreshParticipants);
-    room.on(RoomEvent.ActiveSpeakersChanged, refreshParticipants);
+    const source = ctx.createMediaStreamSource(micStream);
+    const workletNode = new AudioWorkletNode(ctx, 'mic-processor');
+    workletNodeRef.current = workletNode;
 
-    room.on(RoomEvent.Disconnected, () => {
-      if (connGenRef.current !== gen) return;
-      detachRemoteAudio();
-      detachRemoteScreens();
-      stopMicMeter();
-      set({ status: 'idle', channel: null, participants: [], isScreenSharing: false, remoteScreens: [] });
-    });
+    let frameTimestamp = 0;
+    workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+      if (stateRef.current.isMuted) return;
+      const enc = encoderRef.current;
+      if (!enc || enc.state === 'closed') return;
+      const pcm = e.data;
+      enc.encode(new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: pcm.length,
+        numberOfChannels: 1,
+        timestamp: frameTimestamp,
+        data: pcm as unknown as Float32Array<ArrayBuffer>,
+      }));
+      frameTimestamp += pcm.length * (1_000_000 / 48000);
+    };
 
-    try {
-      await room.connect(livekitUrl, voiceToken);
-      if (connGenRef.current !== gen) { room.disconnect(); return; }
-      await room.startAudio();
-      if (localTrackRef.current) await room.localParticipant.publishTrack(localTrackRef.current);
-      set({ status: 'connected', channel, participants: buildParticipants(room) });
-      startMicMeter(micStream);
-    } catch (e) {
-      if (connGenRef.current !== gen) return;
-      set({ status: 'error', errorMsg: `Connection failed: ${(e as Error).message}` });
-    }
-  // join references only refs and stable functions
+    source.connect(workletNode);
+
+    // Notify server.
+    sendFn({ type: 'voice_join', channel_id: String(channel.id) });
+
+    if (connGenRef.current !== gen) { await leave(); return; }
+    set({ status: 'connected', channel, participants: [] });
+    startMicMeter(micStream);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [leave]);
 
   const toggleMute = useCallback(() => {
-    const track = micTrackRef.current;
-    if (!track) return;
-    const nowMuted = track.enabled;
-    track.enabled = !nowMuted;
-    set({ isMuted: nowMuted });
+    set({ isMuted: !stateRef.current.isMuted });
   }, []);
 
   const toggleDeafen = useCallback(() => {
     const next = !stateRef.current.isDeafened;
-    audioElemsRef.current.forEach(el => { el.muted = next; });
+    isDeafenedRef.current = next;
     set({ isDeafened: next });
   }, []);
 
-  const stopScreenShare = useCallback(() => {
-    if (screenTrackRef.current) {
-      screenTrackRef.current.stop();
-      screenTrackRef.current = null;
-    }
-    if (screenUnlistenRef.current) {
-      screenUnlistenRef.current();
-      screenUnlistenRef.current = null;
-    }
-    screenCanvasRef.current = null;
-    if ('__TAURI_INTERNALS__' in window) {
+  const toggleScreenShare = useCallback(() => {
+    if (stateRef.current.isScreenSharing) {
       invoke('stop_screen_capture').catch(() => {});
+      unlistenRef.current?.();
+      unlistenRef.current = null;
+      set({ isScreenSharing: false });
+    } else {
+      set({ showScreenPicker: true });
     }
-    set({ isScreenSharing: false });
   }, []);
 
   const startScreenCapture = useCallback(async (sourceId: string) => {
-    if (!sourceId) { set({ showScreenPicker: false }); return; }
-    const room = roomRef.current;
-    if (!room) return;
-    set({ showScreenPicker: false });
+    if (!sourceId) {
+      set({ showScreenPicker: false });
+      return;
+    }
+    const channel = stateRef.current.channel;
+    if (!channel) return;
+
+    set({ showScreenPicker: false, isScreenSharing: true });
 
     try {
-      const { listen } = await import('@tauri-apps/api/event');
       await invoke('start_screen_capture', { sourceId });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 720;
-      screenCanvasRef.current = canvas;
-      const ctx = canvas.getContext('2d')!;
-
-      const unlisten = await listen<string>('screen-frame', event => {
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        img.src = `data:image/jpeg;base64,${event.payload}`;
+      const unlisten = await listen<string>('screen-frame', (event) => {
+        sendRef.current?.({
+          type: 'stream_frame',
+          channel_id: String(channel.id),
+          data: event.payload,
+        });
       });
-      screenUnlistenRef.current = unlisten;
-
-      const stream = canvas.captureStream(15);
-      const videoTrack = stream.getVideoTracks()[0];
-      const livekitTrack = new window.LivekitClient.LocalVideoTrack(videoTrack);
-      screenTrackRef.current = {
-        mediaStreamTrack: videoTrack,
-        stop: () => { videoTrack.stop(); stream.getTracks().forEach(t => t.stop()); },
-      };
-
-      await room.localParticipant.publishTrack(livekitTrack);
-      set({ isScreenSharing: true });
-      videoTrack.addEventListener('ended', () => stopScreenShare(), { once: true });
+      unlistenRef.current = unlisten;
     } catch (e) {
       console.error('Screen capture failed:', e);
-      stopScreenShare();
+      set({ isScreenSharing: false });
     }
-  }, [stopScreenShare]);
-
-  const toggleScreenShare = useCallback(() => {
-    if (!roomRef.current || stateRef.current.status !== 'connected') return;
-    if (stateRef.current.isScreenSharing) {
-      stopScreenShare();
-    } else if ('__TAURI_INTERNALS__' in window) {
-      set({ showScreenPicker: true });
-    } else {
-      window.LivekitClient.createLocalScreenTracks({ audio: false }).then(tracks => {
-        if (!tracks.length) return;
-        const screenTrack = tracks[0];
-        screenTrackRef.current = screenTrack;
-        roomRef.current!.localParticipant.publishTrack(screenTrack).then(() => {
-          set({ isScreenSharing: true });
-          screenTrack.mediaStreamTrack.addEventListener('ended', () => {
-            screenTrackRef.current = null;
-            set({ isScreenSharing: false });
-          }, { once: true });
-        });
-      }).catch(() => {});
-    }
-  }, [stopScreenShare]);
-
-  const leave = useCallback(async () => {
-    stopMicMeter();
-    detachRemoteAudio();
-    detachRemoteScreens();
-    stopScreenShare();
-    if (roomRef.current) { roomRef.current.disconnect(); roomRef.current = null; }
-    if (localTrackRef.current) {
-      (localTrackRef.current as { stop(): void }).stop?.();
-      localTrackRef.current = null;
-    }
-    micTrackRef.current = null;
-    setState(INITIAL);
-  }, [stopScreenShare]);
+  }, []);
 
   return {
     voiceState: state,
+    remoteFrames,
     joinVoice: join,
     leaveVoice: leave,
     toggleMute,
     toggleDeafen,
     toggleScreenShare,
     startScreenCapture,
+    handleVoiceAudio,
+    handleVoiceState,
+    handleScreenFrame,
   };
 }

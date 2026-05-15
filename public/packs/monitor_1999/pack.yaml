@@ -1,0 +1,15 @@
+name: "Monitor 1999"
+author: "Creeper7"
+version: "1.0.0"
+description: "Phosphor-green CRT monitor aesthetic inspired by retro terminal tech"
+price: 0
+
+assets:
+  colors: "colors.yaml"
+  css: "overrides.css"
+
+features:
+  custom_sounds: false
+  animated_backgrounds: false
+  custom_emojis: false
+  message_animations: false

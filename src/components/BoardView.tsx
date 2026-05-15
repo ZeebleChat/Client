@@ -123,13 +123,17 @@ function ThreadView({
 
   // merge live replies as they arrive (skip optimistic opt-xxx IDs)
   useEffect(() => {
-    const live = liveMessages.filter(
-      m => String(m.reply_to) === String(post.id) &&
-           !String(m.id).startsWith('opt-') &&
-           !replies.some(r => String(r.id) === String(m.id))
+    const candidates = liveMessages.filter(
+      m => String(m.reply_to) === String(post.id) && !String(m.id).startsWith('opt-')
     );
-    if (live.length) setReplies(prev => [...prev, ...live]);
-  }, [liveMessages, post.id, replies]);
+    if (candidates.length) {
+      setReplies(prev => {
+        const existingIds = new Set(prev.map(r => String(r.id)));
+        const newOnes = candidates.filter(m => !existingIds.has(String(m.id)));
+        return newOnes.length ? [...prev, ...newOnes] : prev;
+      });
+    }
+  }, [liveMessages, post.id]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [replies]);
 

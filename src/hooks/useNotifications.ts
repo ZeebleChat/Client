@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { getBeamIdentity } from '../auth';
+import { addNotification } from '../notificationStore';
 
 export function useNotifications() {
   const notify = useCallback((title: string, body: string, tag?: string) => {
@@ -17,8 +18,8 @@ export function useNotifications() {
     msgChannelId: string | number
   ) => {
     const myId = getBeamIdentity();
-    if (senderBeam === myId) return; // own message
-    if (String(activeChannelId) === String(msgChannelId)) return; // already viewing
+    if (senderBeam === myId) return;
+    if (String(activeChannelId) === String(msgChannelId)) return;
 
     const myName = localStorage.getItem('cached_display_name') || myId || '';
     const isMention = myName
@@ -31,6 +32,20 @@ export function useNotifications() {
     if (notifAllMsg || (notifMention && isMention)) {
       notify(`#${channelName}`, content.slice(0, 100), `ch-${msgChannelId}`);
     }
+
+    if (isMention) {
+      addNotification({
+        type: 'ping',
+        title: `#${channelName}`,
+        body: content.slice(0, 120),
+      });
+    } else if (notifAllMsg) {
+      addNotification({
+        type: 'ping',
+        title: `#${channelName}`,
+        body: content.slice(0, 120),
+      });
+    }
   }, [notify]);
 
   const notifyDm = useCallback((fromBeam: string, content: string) => {
@@ -38,6 +53,11 @@ export function useNotifications() {
     if (fromBeam === myId) return;
     if (localStorage.getItem('notif_dm') === 'false') return;
     notify(`DM from ${fromBeam}`, content.slice(0, 100), `dm-${fromBeam}`);
+    addNotification({
+      type: 'dm',
+      title: fromBeam,
+      body: content.slice(0, 120),
+    });
   }, [notify]);
 
   return { notify, notifyMessage, notifyDm };

@@ -111,3 +111,212 @@
   box-shadow: var(--neu-in-sm),
               0 0 8px rgba(239, 68, 68, 0.3);
 }
+
+.btnActive {
+  color: var(--accent) !important;
+  box-shadow: var(--neu-in-sm) !important;
+}
+
+/* ── Notifications ──────────────────────────────────────────────────────── */
+
+.notifWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.notifPanel {
+  position: fixed;
+  top: 44px;
+  left: 14px;
+  width: 320px;
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: notifIn 0.15s ease-out;
+}
+
+@keyframes notifIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+.notifHeader {
+  padding: 14px 16px 10px;
+  border-bottom: var(--border-soft);
+  flex-shrink: 0;
+}
+
+.notifTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.notifTabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 4px;
+  flex-shrink: 0;
+}
+
+.notifTab {
+  flex: 1;
+  padding: 6px 4px;
+  border-radius: 7px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.notifTab:hover {
+  color: var(--text-1);
+  background: var(--bg-hover, rgba(255,255,255,0.05));
+}
+
+.notifTabActive {
+  background: var(--bg-main);
+  color: var(--accent);
+  box-shadow: var(--neu-in-sm);
+}
+
+.notifTabActive:hover {
+  background: var(--bg-main);
+  color: var(--accent);
+}
+
+.notifBody {
+  min-height: 160px;
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.notifEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  opacity: 0.5;
+}
+
+.notifEmptyIcon {
+  opacity: 0.6;
+}
+
+/* ── Bell badge ─────────────────────────────────────────────────────────── */
+.badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--red, #ef4444);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Make notifWrap btn position:relative so badge anchors correctly */
+.notifWrap .btn {
+  position: relative;
+}
+
+/* ── Tab unread badge ───────────────────────────────────────────────────── */
+.tabBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: var(--accent, #6366f1);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Notification items ─────────────────────────────────────────────────── */
+.notifItem {
+  padding: 10px 14px;
+  border-bottom: var(--border-soft);
+  cursor: default;
+  transition: background 0.12s;
+}
+
+.notifItem:last-child {
+  border-bottom: none;
+}
+
+.notifItem:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.04));
+}
+
+.notifItemUnread {
+  border-left: 2px solid var(--accent, #6366f1);
+  padding-left: 12px;
+}
+
+.notifItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.notifItemTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.notifItemTime {
+  font-size: 10px;
+  color: var(--text-3, #6b7280);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.notifItemBody {
+  font-size: 12px;
+  color: var(--text-2, #9ca3af);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

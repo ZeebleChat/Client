@@ -56,7 +56,7 @@ The client connects to `https://api.zeeble.xyz` by default. To connect to a self
 ```env
 VITE_AUTH_URL=https://your-server.example.com
 VITE_ZCLOUD_URL=https://your-cloud.example.com
-VITE_TENOR_API_KEY=your_tenor_key   # optional, for GIF search
+# GIF search is proxied through the auth server — set GIPHY_API_KEY in services/.env
 ```
 
 ## Tech Stack

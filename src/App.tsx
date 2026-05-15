@@ -6,6 +6,7 @@ import {
   fetchMessages,
   fetchMembers,
   fetchCustomRoles,
+  fetchServerInfo,
   exchangeToken,
   getAccountInfo,
   leaveCloudServer,
@@ -22,6 +23,7 @@ import { getBeamIdentity } from './auth';
 import type { SidebarCategory } from './types';
 import { useWebSocket, buildChatMessagePayload } from './hooks/useWebSocket';
 import { useTheme } from './hooks/useTheme';
+import { useResourcePack } from './hooks/useResourcePack';
 
 import Sidebar from './components/Sidebar';
 import ChatMain from './components/ChatMain';
@@ -34,6 +36,7 @@ import RailAdapter from './components/RailAdapter';
 import VoiceModal from './components/VoiceModal';
 import AddServerModal from './components/AddServerModal';
 import HomeView from './components/HomeView';
+import CommunityView from './components/CommunityView';
 import AccountModal from './components/AccountModal';
 import ServerSettingsModal from './components/ServerSettingsModal';
 import DevPanel from './components/DevPanel';
@@ -42,6 +45,8 @@ import ScreenPickerModal from './components/ScreenPickerModal';
 import TitleBar from './components/TitleBar';
 import PermissionsSetup from './components/PermissionsSetup';
 import { useVoice } from './hooks/useVoice';
+import { useStream } from './hooks/useStream';
+import StreamModal from './components/StreamModal';
 import { useHealthCheck } from './hooks/useHealthCheck';
 import { useVoiceRooms } from './hooks/useVoiceRooms';
 import { useNotifications } from './hooks/useNotifications';
@@ -49,24 +54,42 @@ import StatusBanner from './components/StatusBanner';
 
 export default function App() {
   useTheme();
+  const resourcePack = useResourcePack();
+
+  // Dev helper: window.__pack.loadPack('/packs/dark_midnight/') etc.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__pack = resourcePack;
+    }
+  }, [resourcePack]);
   const [authed, setAuthed] = useState(isAuthenticated());
+
+  // In Tauri the permission compat layer handles everything at the OS level —
+  // mark setup done immediately so the PermissionsSetup screen never appears.
+  const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+
   const [permissionsReady, setPermissionsReady] = useState(
-    () => localStorage.getItem('permissions_setup_done') === '1'
+    () => isTauri || localStorage.getItem('permissions_setup_done') === '1'
   );
 
-  // Check existing permission grants so returning users skip the setup screen.
+  // In Tauri: persist the flag once so future launches never re-check.
+  // In browser: check existing grants so returning users skip the setup screen.
   useEffect(() => {
     if (!authed) return;
-    if (permissionsReady) return;
-    Promise.all([
-      navigator.permissions.query({ name: 'microphone' as PermissionName }).catch(() => ({ state: 'prompt' })),
-    ]).then(([mic]) => {
-      const notif = 'Notification' in window ? Notification.permission : 'granted';
-      if (mic.state === 'granted' && notif === 'granted') {
-        localStorage.setItem('permissions_setup_done', '1');
-        setPermissionsReady(true);
-      }
-    });
+    if (permissionsReady) {
+      if (isTauri) localStorage.setItem('permissions_setup_done', '1');
+      return;
+    }
+    navigator.permissions
+      .query({ name: 'microphone' as PermissionName })
+      .catch(() => ({ state: 'prompt' }))
+      .then(mic => {
+        const notif = 'Notification' in window ? Notification.permission : 'granted';
+        if (mic.state === 'granted' && notif === 'granted') {
+          localStorage.setItem('permissions_setup_done', '1');
+          setPermissionsReady(true);
+        }
+      });
   }, [authed]);
 
   const [servers, setServers] = useState<ApiServer[]>([]);
@@ -84,15 +107,21 @@ export default function App() {
 
   const [memberGroups, setMemberGroups] = useState<ApiMemberGroup[]>([]);
 
-  const { voiceState, joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreenShare, startScreenCapture } = useVoice();
-  const voiceRoomParticipants = useVoiceRooms(!!activeServerUrl && authed);
+  const { voiceState, remoteFrames, joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreenShare, startScreenCapture, handleVoiceAudio, handleVoiceState, handleScreenFrame } = useVoice();
+  const { streamState, startBroadcast, joinAsViewer, stopStream, handleStreamAudio, handleStreamEnded, toggleStreamMute: toggleStreamMuteInternal } = useStream();
+  // channelId → broadcaster identity for all currently live streams
+  const [liveStreams, setLiveStreams] = useState<Map<string, string>>(new Map());
+  const voiceRoomParticipants = useVoiceRooms(!!activeServerUrl && authed && isZcloudUrl(activeServerUrl));
+  const [serverBannerAttachmentId, setServerBannerAttachmentId] = useState<number | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [streamModalOpen, setStreamModalOpen] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [devPanelOpen, setDevPanelOpen] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [serverSettingsInitialTab, setServerSettingsInitialTab] = useState<'overview' | 'categories' | 'roles' | 'invites'>('overview');
-  const [view, setView] = useState<'server' | 'home'>(
+  const [view, setView] = useState<'server' | 'home' | 'community'>(
     localStorage.getItem('active_server_url') ? 'server' : 'home'
   );
 
@@ -147,6 +176,11 @@ export default function App() {
     }
     if (event.type === 'member') {
       setMemberGroups(event.groups);
+      for (const group of event.groups) {
+        for (const user of group.users) {
+          if (user.avatar != null) setAvatarCache(user.name, String(user.avatar));
+        }
+      }
     }
     if (event.type === 'channel_created') {
       setChannels(prev => prev.some(c => String(c.id) === String(event.channel.id)) ? prev : [...prev, event.channel]);
@@ -157,12 +191,31 @@ export default function App() {
     if (event.type === 'channel_renamed') {
       setChannels(prev => prev.map(c => String(c.id) === String(event.channel.id) ? { ...c, ...event.channel } : c));
     }
-  }, []);
+    if (event.type === 'voice_state') {
+      handleVoiceState(event);
+    }
+    if (event.type === 'stream_start') {
+      setLiveStreams(prev => new Map(prev).set(event.channel_id, event.broadcaster));
+    }
+    if (event.type === 'stream_end') {
+      setLiveStreams(prev => { const next = new Map(prev); next.delete(event.channel_id); return next; });
+      handleStreamEnded();
+    }
+    if (event.type === 'stream_started') {
+      setStreamModalOpen(true);
+    }
+    if (event.type === 'stream_joined') {
+      setStreamModalOpen(true);
+    }
+  }, [handleVoiceState, handleStreamEnded]);
 
   const { send } = useWebSocket({
     serverUrl: activeServerUrl,
     channelId: activeChannel?.id ?? null,
     onEvent: handleWsEvent,
+    onVoiceAudio: handleVoiceAudio,
+    onStreamAudio: handleStreamAudio,
+    onScreenFrame: handleScreenFrame,
   });
 
   useEffect(() => {
@@ -189,6 +242,7 @@ export default function App() {
     setActiveChannel(channel);
     setMessages([]);
     setMessagesLoading(true);
+    setMobileSidebarOpen(false);
     const msgs = await fetchMessages(channel.id);
     setMessages(msgs);
     setMessagesLoading(false);
@@ -216,6 +270,7 @@ export default function App() {
     setChannels(chs);
     setApiCategories(cats);
     setMemberGroups(mems);
+    fetchServerInfo(serverUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
 
     const first = chs.find(ch => ch.type === 'text');
     if (first) selectChannel(first);
@@ -236,6 +291,7 @@ export default function App() {
       setChannels(chs);
       setApiCategories(cats);
       setMemberGroups(mems);
+      fetchServerInfo(activeServerUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
       const first = chs.find(ch => ch.type === 'text');
       if (first) selectChannel(first);
     })();
@@ -256,21 +312,36 @@ export default function App() {
     send(payload);
   }, [activeChannel, send]);
 
-  const handleReply = useCallback((content: string, replyTo: string | number) => {
+  const handleReply = useCallback((content: string, replyTo: string | number, attachmentIds?: (string | number)[]) => {
     if (!activeChannel) return;
-    const { payload, optimistic } = buildChatMessagePayload(activeChannel.id, content, [], { replyTo });
+    const { payload, optimistic } = buildChatMessagePayload(activeChannel.id, content, attachmentIds ?? [], { replyTo });
     setMessages(prev => [...prev, { ...optimistic, _optimistic: true } as ApiMessage]);
     send(payload);
   }, [activeChannel, send]);
 
   const handleJoinVoice = useCallback(async (channel: ApiChannel) => {
-    await joinVoice(channel);
-  }, [joinVoice]);
+    await joinVoice(channel, send);
+  }, [joinVoice, send]);
 
   const handleLeaveVoice = useCallback(async () => {
     await leaveVoice();
     setVoiceModalOpen(false);
   }, [leaveVoice]);
+
+  const handleStartStream = useCallback(async (channel: ApiChannel) => {
+    await startBroadcast(channel, send);
+  }, [startBroadcast, send]);
+
+  const handleJoinStream = useCallback(async (channel: ApiChannel) => {
+    const broadcaster = liveStreams.get(String(channel.id));
+    if (!broadcaster) return;
+    await joinAsViewer(channel, broadcaster, send);
+  }, [joinAsViewer, liveStreams, send]);
+
+  const handleStopStream = useCallback(async () => {
+    await stopStream();
+    setStreamModalOpen(false);
+  }, [stopStream]);
 
   const roleMap = useMemo(() => {
     const map: Record<string, string | null | undefined> = {};
@@ -356,6 +427,9 @@ export default function App() {
     <div className={styles.root}>
       <TitleBar />
       <div className={styles.app}>
+        {mobileSidebarOpen && (
+          <div className={styles.backdrop} onClick={() => setMobileSidebarOpen(false)} />
+        )}
         <RailAdapter
           servers={servers}
           activeServerUrl={activeServerUrl}
@@ -365,8 +439,27 @@ export default function App() {
           onAddServer={() => setAddServerOpen(true)}
           onHome={() => setView('home')}
           onOpenAccount={() => setAccountOpen(true)}
+          onCommunity={() => setView('community')}
+          onLeaveServer={async (serverUrl) => {
+            // Disconnect from voice first if we're on the server being left
+            if (voiceState.status === 'connected' && serverUrl === activeServerUrl) {
+              await handleLeaveVoice();
+            }
+            const result = await leaveCloudServer(serverUrl);
+            if (result.ok) {
+              if (serverUrl === activeServerUrl) {
+                localStorage.removeItem('active_server_url');
+                localStorage.removeItem('active_server_name');
+                setActiveServerUrl('');
+                setView('home');
+              }
+              setServers(await fetchServers());
+            }
+          }}
         />
-        {view === 'home' ? (
+        {view === 'community' ? (
+          <CommunityView resourcePack={resourcePack} />
+        ) : view === 'home' ? (
           <HomeView
             onOpenAccount={() => setAccountOpen(true)}
             onAddServer={() => setAddServerOpen(true)}
@@ -380,7 +473,9 @@ export default function App() {
         ) : (
           <>
             <Sidebar
+              mobileOpen={mobileSidebarOpen}
               serverName={activeServerName}
+              bannerAttachmentId={serverBannerAttachmentId}
               categories={sidebarCategories}
               activeChannelId={activeChannel?.id ?? null}
               activeVoiceChannelId={voiceState.channel?.id ?? null}
@@ -390,6 +485,9 @@ export default function App() {
               onSelectChannel={selectChannel}
               onJoinVoice={handleJoinVoice}
               onLeaveVoice={handleLeaveVoice}
+              liveStreamChannels={liveStreams}
+              onStartStream={handleStartStream}
+              onJoinStream={handleJoinStream}
               voiceMuted={voiceState.isMuted}
               voiceDeafened={voiceState.isDeafened}
               onToggleMute={toggleMute}
@@ -445,15 +543,19 @@ export default function App() {
                 channelId={activeChannel?.id ?? null}
                 messages={messages}
                 onSend={handleSend}
+                onReply={handleReply}
                 loading={messagesLoading}
                 roleMap={roleMap}
+                onOpenSidebar={() => setMobileSidebarOpen(true)}
+                emojiManifest={resourcePack.activePack?.emojiManifest}
+                packBaseUrl={resourcePack.activePack?.baseUrl}
               />
             )}
             <Members groups={memberGroups} onDm={() => setView('home')} />
           </>
         )}
 
-        <ScreenShareOverlay screens={voiceState.remoteScreens} />
+        <ScreenShareOverlay frames={remoteFrames} />
         {voiceState.showScreenPicker && (
           <ScreenPickerModal
             onShare={startScreenCapture}
@@ -465,7 +567,14 @@ export default function App() {
             state={voiceState}
             onLeave={handleLeaveVoice}
             onClose={() => setVoiceModalOpen(false)}
-            onToggleScreenShare={toggleScreenShare}
+          />
+        )}
+        {streamModalOpen && (
+          <StreamModal
+            state={streamState}
+            onStop={handleStopStream}
+            onToggleMute={toggleStreamMuteInternal}
+            onClose={() => setStreamModalOpen(false)}
           />
         )}
         {addServerOpen && (
@@ -493,6 +602,7 @@ export default function App() {
               setChannels(chs);
               setApiCategories(cats);
               setMemberGroups(mems);
+              fetchServerInfo(activeServerUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
             }}
           />
         )}

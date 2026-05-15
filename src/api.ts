@@ -1,4 +1,4 @@
-import { getAuthUrl, getServerUrl, getDmUrl, isZcloudUrl } from './config';
+import { getAuthUrl, getServerUrl, getDmUrl, isZcloudUrl, getMarketUrl } from './config';
 import {
   getToken,
   getUid,
@@ -116,11 +116,18 @@ export interface LoginResult {
   error?: string;
 }
 
-export async function loginReq(beam_identity: string, password: string): Promise<LoginResult> {
+export async function loginReq(
+  credential: string,
+  password: string,
+  useEmail: boolean,
+): Promise<LoginResult> {
+  const body = useEmail
+    ? { email: credential, password }
+    : { beam_identity: credential, password };
   const res = await fetch(`${getAuthUrl()}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ beam_identity, password }),
+    body: JSON.stringify(body),
   });
   const data = await safeJson(res) as LoginResult['data'];
   return { ok: res.ok, status: res.status, data };
@@ -232,6 +239,7 @@ export interface ServerInfo {
   public_url?: string;
   about?: string;
   logo_attachment_id?: number | null;
+  banner_attachment_id?: number | null;
 }
 
 export function getServerAttachmentUrl(serverUrl: string, attachmentId: number | string): string {
@@ -340,7 +348,7 @@ export interface ApiMemberUser {
   name: string;
   role?: string | null;
   status?: string;
-  avatar?: string | null;
+  avatar?: string | number | null;
   is_owner?: boolean;
 }
 
@@ -363,11 +371,15 @@ function normalizeFlatMembers(members: unknown[]): ApiMemberGroup[] {
   const first = members[0] as Record<string, unknown>;
   if ('category' in first) return members as ApiMemberGroup[];
   if ('beam_identity' in first) {
-    const flat = members as { beam_identity: string; role?: string; status?: string }[];
+    const flat = members as { beam_identity: string; display_name?: string | null; role?: string; status?: string; avatar?: number | string | null; is_owner?: boolean }[];
     const online = flat.filter(m => m.status === 'online');
     const offline = flat.filter(m => m.status !== 'online');
     const toUser = (m: typeof flat[0]): ApiMemberUser => ({
-      name: m.beam_identity, role: m.role ?? null, status: m.status,
+      name: m.display_name?.trim() || m.beam_identity,
+      role: m.role ?? null,
+      status: m.status,
+      avatar: m.avatar != null ? String(m.avatar) : null,
+      is_owner: m.is_owner ?? m.role === 'owner',
     });
     const result: ApiMemberGroup[] = [];
     if (online.length) result.push({ category: 'Online', users: online.map(toUser) });
@@ -390,6 +402,16 @@ export async function editMessage(messageId: string | number, content: string): 
     const res = await authedFetch(
       `${getServerUrl()}/v1/messages/${encodeURIComponent(String(messageId))}`,
       { method: 'PATCH', body: JSON.stringify({ content }) }
+    );
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function deleteMessage(messageId: string | number): Promise<boolean> {
+  try {
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/messages/${encodeURIComponent(String(messageId))}`,
+      { method: 'DELETE' }
     );
     return res.ok;
   } catch { return false; }
@@ -508,7 +530,10 @@ export async function leaveCloudServer(serverUrl: string): Promise<{ ok: boolean
   const identity = getBeamIdentity();
   if (!identity) return { ok: false, error: 'Not logged in' };
   try {
-    const res = await authedFetch(`${serverUrl}/v1/members/${encodeURIComponent(identity)}`, { method: 'DELETE' });
+    // Tell the chat server to mark the user as left (best-effort)
+    await authedFetch(`${serverUrl}/v1/members/${encodeURIComponent(identity)}`, { method: 'DELETE' }).catch(() => {});
+    // Remove from zbeam's server list — this is the authoritative record
+    const res = await authedFetch(`${getAuthUrl()}/servers/${encodeURIComponent(serverUrl)}`, { method: 'DELETE' });
     return { ok: res.ok || res.status === 204 };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -979,13 +1004,18 @@ export interface ApiAccountInfo {
   account_type?: string;
   premium?: boolean;
   verified?: boolean;
+  age_verified?: boolean;
+  ichor_balance?: number;
   avatar_attachment_id?: string | null;
+  banner_attachment_id?: string | null;
   auth_methods?: string[];
   children?: ApiSubAccount[];
   alts?: ApiSubAccount[];
   bots?: ApiSubAccount[];
   streamers?: ApiSubAccount[];
   email?: string | null;
+  discord_linked?: boolean;
+  steam_linked?: boolean;
 }
 
 export async function getAccountInfo(): Promise<ApiAccountInfo | null> {
@@ -994,6 +1024,24 @@ export async function getAccountInfo(): Promise<ApiAccountInfo | null> {
     if (!res.ok) return null;
     return res.json();
   } catch { return null; }
+}
+
+export async function buyIchorCheckout(): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/shop/buy-ichor`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error ?? 'Failed to start checkout' };
+    return { ok: true, url: data.url };
+  } catch { return { ok: false, error: 'Network error' }; }
+}
+
+export async function redeemIchorForPremium(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/shop/premium-with-ichor`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error ?? 'Failed to redeem' };
+    return { ok: true };
+  } catch { return { ok: false, error: 'Network error' }; }
 }
 
 export async function updateDisplayName(name: string): Promise<{ ok: boolean; error?: string }> {
@@ -1341,6 +1389,38 @@ export async function confirmSubscriptionPayment(
   } catch { return { ok: false, error: 'Network error' }; }
 }
 
+export async function startIdentityVerification(): Promise<{
+  ok: boolean;
+  clientSecret?: string;
+  url?: string;
+  sessionId?: string;
+  error?: string;
+}> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/stripe/identity/start`, { method: 'POST' });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      const err = data.error;
+      return { ok: false, error: typeof err === 'string' ? err : 'Failed to start verification' };
+    }
+    return {
+      ok: true,
+      clientSecret: data.client_secret as string,
+      url: data.url as string,
+      sessionId: data.session_id as string,
+    };
+  } catch { return { ok: false, error: 'Network error' }; }
+}
+
+export async function getIdentityStatus(): Promise<{ ageVerified: boolean }> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/stripe/identity/status`);
+    if (!res.ok) return { ageVerified: false };
+    const data = await safeJson(res);
+    return { ageVerified: data.age_verified === true };
+  } catch { return { ageVerified: false }; }
+}
+
 export async function redeemPromoCode(code: string): Promise<{ ok: boolean; message?: string; error?: string }> {
   try {
     const res = await authedFetch(`${getAuthUrl()}/promo/redeem`, {
@@ -1654,4 +1734,129 @@ export async function adminListServers(): Promise<AdminServer[]> {
     const data = await safeJson<{ servers: AdminServer[] }>(res);
     return data.servers ?? [];
   } catch { return []; }
+}
+
+export async function adminDeleteServer(serverUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/admin/servers`, {
+      method: 'DELETE',
+      headers: adminHeaders(),
+      body: JSON.stringify({ server_url: serverUrl }),
+      signal: AbortSignal.timeout(10000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+export async function adminSuspendUser(uid: string, reason: string, days: number): Promise<boolean> {
+  const expiresAt = Math.floor(Date.now() / 1000) + days * 86400;
+  return adminLockUser(uid, reason, expiresAt);
+}
+
+// ── OAuth ─────────────────────────────────────────────────────────────────────
+
+export type OAuthProvider = 'discord' | 'steam';
+
+export interface OAuthStartResult {
+  state: string;
+  url: string;
+}
+
+export interface OAuthPollResult {
+  ready: boolean;
+  linked?: boolean;
+  token?: string;
+  refresh_token?: string;
+  uid?: string;
+  beam_identity?: string;
+  error?: string;
+}
+
+export async function oauthStart(provider: OAuthProvider): Promise<OAuthStartResult | null> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/oauth/${provider}/start`, { method: 'POST' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch { return null; }
+}
+
+export async function oauthPoll(state: string): Promise<OAuthPollResult> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/oauth/poll?state=${encodeURIComponent(state)}`);
+    if (!res.ok) return { ready: false };
+    return res.json();
+  } catch { return { ready: false }; }
+}
+
+export async function oauthUnlink(provider: OAuthProvider): Promise<boolean> {
+  try {
+    const res = await authedFetch(`${getAuthUrl()}/oauth/${provider}`, { method: 'DELETE' });
+    return res.ok;
+  } catch { return false; }
+}
+
+// ── Community Marketplace (zmarket) ──────────────────────────────────────────
+
+export interface MarketPackListing {
+  id: string;
+  name: string;
+  category: string;
+  preview_emoji: string;
+  price_ichor: number;
+  description: string | null;
+  pack_url: string | null;
+  author_beam_identity: string;
+  author_display_name: string;
+  status: string;
+  sales: number;
+  created_at: string;
+}
+
+export async function fetchMarketListings(
+  category?: string,
+  sort?: string,
+): Promise<MarketPackListing[]> {
+  try {
+    const params = new URLSearchParams();
+    if (category && category !== 'all') params.set('category', category);
+    if (sort) params.set('sort', sort);
+    const query = params.toString() ? `?${params}` : '';
+    const res = await fetch(`${getMarketUrl()}/packs${query}`);
+    if (!res.ok) return [];
+    const data = await safeJson<{ packs: MarketPackListing[] }>(res);
+    return data.packs ?? [];
+  } catch { return []; }
+}
+
+export async function uploadPack(
+  formData: FormData,
+): Promise<{ ok: boolean; id?: string; pack_url?: string; error?: string }> {
+  try {
+    const res = await authedFetch(`${getMarketUrl()}/packs/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const data = await safeJson<{ error: string }>(res);
+      return { ok: false, error: data.error || 'Upload failed' };
+    }
+    const data = await safeJson<{ ok: boolean; id: string; pack_url: string }>(res);
+    return { ok: true, id: data.id, pack_url: data.pack_url };
+  } catch { return { ok: false, error: 'Network error' }; }
+}
+
+export async function fetchMyMarketPacks(): Promise<MarketPackListing[]> {
+  try {
+    const res = await authedFetch(`${getMarketUrl()}/packs/mine`);
+    if (!res.ok) return [];
+    const data = await safeJson<{ packs: MarketPackListing[] }>(res);
+    return data.packs ?? [];
+  } catch { return []; }
+}
+
+export async function deleteMarketPack(id: string): Promise<boolean> {
+  try {
+    const res = await authedFetch(`${getMarketUrl()}/packs/${id}`, { method: 'DELETE' });
+    return res.status === 204;
+  } catch { return false; }
 }

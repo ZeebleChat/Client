@@ -13,4 +13,24 @@
   flex: 1;
   min-height: 0;   /* prevents flex child from overflowing */
   overflow: hidden;
+  position: relative;
+}
+
+.backdrop {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 40;
+    cursor: pointer;
+  }
 }

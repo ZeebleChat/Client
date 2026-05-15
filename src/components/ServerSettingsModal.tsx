@@ -72,11 +72,20 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
   const [iconErr,       setIconErr]       = useState('');
   const iconInputRef = useRef<HTMLInputElement>(null);
 
-  // Load current icon on mount
+  // Banner state
+  const [bannerUrl,       setBannerUrl]       = useState<string | null>(null);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [bannerErr,       setBannerErr]       = useState('');
+  const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  // Load current icon and banner on mount
   useEffect(() => {
     fetchServerInfo(getServerUrl()).then(info => {
       if (info?.logo_attachment_id) {
         setIconUrl(getServerAttachmentUrl(getServerUrl(), info.logo_attachment_id));
+      }
+      if (info?.banner_attachment_id) {
+        setBannerUrl(getServerAttachmentUrl(getServerUrl(), info.banner_attachment_id));
       }
     });
   }, []);
@@ -127,6 +136,35 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
     if (iconInputRef.current) iconInputRef.current.value = '';
   }
 
+  async function handleBannerFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setBannerErr('Must be an image file'); return; }
+    if (file.size > 8 * 1024 * 1024) { setBannerErr('Image must be under 8 MB'); return; }
+    setBannerErr('');
+    setBannerUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = ev => setBannerUrl(ev.target?.result as string);
+    reader.readAsDataURL(file);
+
+    const up = await uploadFile(file);
+    if (!up.ok || up.id == null) {
+      setBannerErr(up.error ?? 'Upload failed');
+      setBannerUploading(false);
+      return;
+    }
+    const patch = await patchServerSettings({ banner_attachment_id: Number(up.id) });
+    setBannerUploading(false);
+    if (!patch.ok) {
+      setBannerErr(patch.error ?? 'Failed to set banner');
+    } else {
+      setBannerUrl(getServerAttachmentUrl(getServerUrl(), up.id));
+      onRefresh();
+    }
+    if (bannerInputRef.current) bannerInputRef.current.value = '';
+  }
+
   const initials = serverName.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
@@ -170,6 +208,39 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
         style={{ display: 'none' }}
         onChange={handleIconFile}
       />
+
+      <div style={{ height: 20 }} />
+
+      {/* Server Banner */}
+      <div className={styles.sectionTitle}>Server Banner</div>
+      <div
+        className={`${styles.bannerPreview} ${isOwner ? styles.bannerPreviewClickable : ''}`}
+        onClick={() => isOwner && bannerInputRef.current?.click()}
+        title={isOwner ? 'Click to upload banner' : undefined}
+      >
+        {bannerUrl ? (
+          <img src={bannerUrl} alt="Server banner" className={styles.bannerImg} />
+        ) : (
+          <span className={styles.bannerPlaceholder}>No banner set</span>
+        )}
+        {isOwner && (
+          <div className={styles.bannerOverlay}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            <span>{bannerUploading ? 'Uploading…' : 'Change Banner'}</span>
+          </div>
+        )}
+      </div>
+      <input
+        ref={bannerInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleBannerFile}
+      />
+      {bannerErr && <p style={{ color: 'var(--red, #e94560)', fontSize: 12, margin: '4px 0 0' }}>{bannerErr}</p>}
 
       <div style={{ height: 20 }} />
 
