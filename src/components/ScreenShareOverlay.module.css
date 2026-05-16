@@ -18,6 +18,35 @@
   width: 220px;
 }
 
+.expanded {
+  width: calc(100vw - 32px);
+  max-width: 100%;
+  bottom: 16px;
+  right: 16px;
+  left: 16px;
+  height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+
+.expanded .screenList {
+  max-height: none;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.expanded .video {
+  max-height: none;
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+}
+
+.expanded .screenItem {
+  flex: 1;
+  min-height: 0;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -47,6 +76,10 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.header:active {
+  cursor: grabbing;
 }
 
 .minimizeBtn {

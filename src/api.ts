@@ -621,6 +621,34 @@ export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
+export function getDmAttachmentUrl(attachmentId: string | number): string {
+  const base = getDmUrl();
+  const token = getToken();
+  return `${base}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+}
+
+export async function uploadDmFile(file: File): Promise<{ ok: boolean; id?: string | number; error?: string }> {
+  try {
+    const form = new FormData();
+    form.append('file0', file);
+    const base = getDmUrl();
+    const token = getToken() ?? '';
+    const res = await fetch(`${base}/v1/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    const data = await safeJson(res);
+    if (!res.ok) return { ok: false, error: (data.error as string) || 'Upload failed' };
+    if (Array.isArray(data.attachments)) {
+      const first = (data.attachments as Record<string, unknown>[])[0];
+      return { ok: true, id: first?.attachment_id as string | number };
+    }
+    if (data.id != null) return { ok: true, id: data.id as string | number };
+    return { ok: false, error: (data.error as string) || 'Unexpected upload response' };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
 // ── Channel management ────────────────────────────────────────────────────────
 
 export async function createChannel(
@@ -941,15 +969,26 @@ export interface ApiDmMessage {
   to: string;
   content: string;
   created_at: number | string;
+  attachments?: ApiAttachment[];
 }
 
 function normaliseDm(raw: Record<string, unknown>): ApiDmMessage {
+  const rawAtts = raw.attachments ?? raw.files ?? [];
+  const attachments: ApiAttachment[] = Array.isArray(rawAtts)
+    ? (rawAtts as Record<string, unknown>[]).map(a => ({
+        id: (a.id ?? a.attachment_id ?? '') as string | number,
+        filename: a.filename as string | undefined,
+        content_type: (a.content_type ?? a.mime_type) as string | undefined,
+        size: a.size as number | undefined,
+      }))
+    : [];
   return {
     id: (raw.id ?? raw.message_id ?? '') as string,
     from: (raw.from ?? raw.sender_beam ?? '') as string,
     to: (raw.to ?? raw.recipient_beam ?? '') as string,
     content: (raw.content ?? raw.message ?? '') as string,
     created_at: (raw.created_at ?? raw.timestamp ?? 0) as number | string,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
 }
 
@@ -966,11 +1005,11 @@ export async function fetchDMs(withBeam: string, limit = 100): Promise<ApiDmMess
   } catch { return []; }
 }
 
-export async function sendDM(toBeam: string, content: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendDM(toBeam: string, content: string, attachmentIds?: (string | number)[]): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await authedFetch(`${getDmUrl()}/dms`, {
       method: 'POST',
-      body: JSON.stringify({ to: toBeam, content, attachment_ids: [] }),
+      body: JSON.stringify({ to: toBeam, content, attachment_ids: attachmentIds ?? [] }),
     });
     if (!res.ok) {
       const data = await safeJson(res);

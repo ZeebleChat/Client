@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import EmojiPicker, { type EmojiClickData, Theme } from 'emoji-picker-react';
-import TenorPicker from './TenorPicker';
+import GiphyPicker from './GiphyPicker';
 import UserPopup, { type UserPopupInfo, type UserPopupPos } from './UserPopup';
 import VideoPlayer from './VideoPlayer';
 import Lightbox from './Lightbox';
@@ -823,7 +823,7 @@ export default function ChatMain({ channelName, channelId, messages, onSend, onR
         )}
         {gifOpen && (
           <div className={styles.gifPickerWrap} ref={gifPickerRef}>
-            <TenorPicker onSelect={handleGifSelect} />
+            <GiphyPicker onSelect={handleGifSelect} onClose={() => setGifOpen(false)} />
           </div>
         )}
         {pendingFiles.length > 0 && (

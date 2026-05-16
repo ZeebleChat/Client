@@ -3,7 +3,7 @@
  * Shows friends list, direct messages, and DM conversation.
  * Includes WebSocket for real-time DM updates.
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   fetchFriends,
@@ -13,15 +13,20 @@ import {
   fetchFriendRequests,
   fetchDMs,
   sendDM,
+  getDmAttachmentUrl,
   type ApiFriend,
   type ApiFriendRequest,
   type ApiDmMessage,
+  type ApiAttachment,
 } from '../api';
 import { getBeamIdentity, getToken } from '../auth';
 import { useNotifications } from '../hooks/useNotifications';
 import { getDmUrl } from '../config';
 import { setAvatarCache } from '../avatarCache';
 import UserAvatar from './UserAvatar';
+import EmojiPicker, { type EmojiClickData, Theme } from 'emoji-picker-react';
+import GiphyPicker from './GiphyPicker';
+import { searchEmojis, type EmojiEntry } from './emojiData';
 import styles from './HomeView.module.css';
 
 interface Props {
@@ -70,6 +75,57 @@ function formatTs(ts: number | string | null | undefined): string {
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
 
+function isGifUrl(content: string): boolean {
+  const s = content.trim();
+  if (!/^https?:\/\//i.test(s)) return false;
+  if (/\s/.test(s)) return false;
+  return /tenor\.com|giphy\.com|\.gif(\?|$)/i.test(s);
+}
+
+function DmAttachmentView({ att }: { att: ApiAttachment }) {
+  const url = getDmAttachmentUrl(att.id);
+  const ct = att.content_type ?? '';
+  const fname = att.filename ?? '';
+  const isImage = ct.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fname);
+  const isVideo = ct.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi)$/i.test(fname);
+  const isAudio = ct.startsWith('audio/') || /\.(mp3|ogg|wav|flac|m4a)$/i.test(fname);
+
+  if (isImage) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className={styles.dmAttachImgLink}>
+        <img src={url} alt={fname || 'image'} className={styles.dmAttachImg} />
+      </a>
+    );
+  }
+  if (isVideo) {
+    return <video src={url} controls className={styles.dmAttachVideo} />;
+  }
+  if (isAudio) {
+    return <audio src={url} controls className={styles.dmAttachAudio} preload="metadata" />;
+  }
+  const kb = att.size ? ` · ${(att.size / 1024).toFixed(1)} KB` : '';
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className={styles.dmAttachFile}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <span>{fname || 'file'}{kb}</span>
+    </a>
+  );
+}
+
+interface PendingFile {
+  file: File;
+  id?: string | number;
+  uploading: boolean;
+  previewUrl?: string;
+}
+
+function getEmojiPickerTheme(): Theme {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? Theme.LIGHT : Theme.DARK;
+}
+
 // ── DM Conversation panel ──────────────────────────────────────────────────────
 
 interface DmPanelProps {
@@ -82,8 +138,25 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const [messages, setMessages] = useState<ApiDmMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [emojiPickerTheme, setEmojiPickerTheme] = useState(() => getEmojiPickerTheme());
+  const [gifOpen, setGifOpen] = useState(false);
+  const [emojiQuery, setEmojiQuery] = useState<string | null>(null);
+  const [emojiIdx, setEmojiIdx] = useState(0);
+
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const emojiBtnRef = useRef<HTMLButtonElement>(null);
+  const gifBtnRef = useRef<HTMLButtonElement>(null);
+  const gifPickerRef = useRef<HTMLDivElement>(null);
   const myBeam = getBeamIdentity();
+
+  const emojiMatches = useMemo<EmojiEntry[]>(() => {
+    if (emojiQuery === null || emojiQuery.length < 1) return [];
+    return searchEmojis(emojiQuery, 8);
+  }, [emojiQuery]);
+
+  const canSend = input.trim().length > 0;
 
   useEffect(() => {
     setLoading(true);
@@ -93,7 +166,6 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     });
   }, [beamIdentity]);
 
-  // Listen for incoming WS messages relevant to this conversation
   useEffect(() => {
     if (!ws) return;
     const handler = (e: MessageEvent) => {
@@ -105,12 +177,22 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
           data.type === 'dm' &&
           (sender === beamIdentity || recipient === beamIdentity)
         ) {
+          const rawAtts = data.attachments ?? data.files ?? [];
+          const attachments: ApiAttachment[] = Array.isArray(rawAtts)
+            ? (rawAtts as Record<string, unknown>[]).map((a: Record<string, unknown>) => ({
+                id: (a.id ?? a.attachment_id ?? '') as string | number,
+                filename: a.filename as string | undefined,
+                content_type: (a.content_type ?? a.mime_type) as string | undefined,
+                size: a.size as number | undefined,
+              }))
+            : [];
           const msg: ApiDmMessage = {
             id: data.id ?? data.message_id ?? `ws-${Date.now()}`,
             from: data.from ?? data.sender_beam ?? '',
             to: data.to ?? data.recipient_beam ?? '',
             content: data.content ?? data.message ?? '',
             created_at: data.created_at ?? data.timestamp ?? Date.now() / 1000,
+            attachments: attachments.length > 0 ? attachments : undefined,
           };
           setMessages(prev => {
             if (prev.some(m => String(m.id) === String(msg.id))) return prev;
@@ -125,9 +207,34 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     return () => ws.removeEventListener('message', handler);
   }, [ws, beamIdentity]);
 
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  useEffect(() => { if (emojiOpen) setEmojiPickerTheme(getEmojiPickerTheme()); }, [emojiOpen]);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (!emojiOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (emojiBtnRef.current?.contains(target)) return;
+      const pickerEl = document.querySelector('.EmojiPickerReact');
+      if (pickerEl?.contains(target)) return;
+      setEmojiOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [emojiOpen]);
+
+  useEffect(() => {
+    if (!gifOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (gifBtnRef.current?.contains(target)) return;
+      if (gifPickerRef.current?.contains(target)) return;
+      setGifOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [gifOpen]);
 
   async function handleSend() {
     const text = input.trim();
@@ -142,6 +249,74 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     };
     setMessages(prev => [...prev, optimistic]);
     await sendDM(beamIdentity, text);
+  }
+
+  function onEmojiClick(data: EmojiClickData) {
+    const el = inputRef.current;
+    if (!el) { setInput(prev => prev + data.emoji); return; }
+    const start = el.selectionStart ?? input.length;
+    const end = el.selectionEnd ?? input.length;
+    const next = input.slice(0, start) + data.emoji + input.slice(end);
+    setInput(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + data.emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  function handleGifSelect(gifUrl: string) {
+    setGifOpen(false);
+    const optimistic: ApiDmMessage = {
+      id: `opt-${Date.now()}`,
+      from: myBeam,
+      to: beamIdentity,
+      content: gifUrl,
+      created_at: Date.now() / 1000,
+    };
+    setMessages(prev => [...prev, optimistic]);
+    sendDM(beamIdentity, gifUrl);
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setInput(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const textBefore = val.slice(0, cursor);
+    const emojiMatch = textBefore.match(/:([a-z0-9_+\-]{1,30})$/);
+    if (emojiMatch) {
+      setEmojiQuery(emojiMatch[1]);
+      setEmojiIdx(0);
+    } else {
+      setEmojiQuery(null);
+    }
+  }
+
+  function completeEmojiShortcode(entry: EmojiEntry) {
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const textBefore = input.slice(0, cursor);
+    const emojiMatch = textBefore.match(/:([a-z0-9_+\-]{1,30})$/);
+    if (!emojiMatch) return;
+    const start = cursor - emojiMatch[0].length;
+    const newInput = input.slice(0, start) + entry.e + ' ' + input.slice(cursor);
+    setInput(newInput);
+    setEmojiQuery(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + [...entry.e].length + 1;
+      el?.setSelectionRange(pos, pos);
+    });
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (emojiQuery !== null && emojiMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setEmojiIdx(i => (i + 1) % emojiMatches.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setEmojiIdx(i => (i - 1 + emojiMatches.length) % emojiMatches.length); return; }
+      if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); completeEmojiShortcode(emojiMatches[emojiIdx]); return; }
+      if (e.key === 'Escape') { setEmojiQuery(null); return; }
+    }
+    if (e.key === 'Enter') handleSend();
   }
 
   return (
@@ -168,7 +343,17 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
                 {!isMine && (
                   <div className={styles.dmSender}>{msg.from}</div>
                 )}
-                <div className={styles.dmText}>{msg.content}</div>
+                {isGifUrl(msg.content)
+                  ? <img src={msg.content} alt="GIF" className={styles.dmAttachImg} />
+                  : msg.content && <div className={styles.dmText}>{msg.content}</div>
+                }
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className={styles.dmMsgAttachments}>
+                    {msg.attachments.map(att => (
+                      <DmAttachmentView key={String(att.id)} att={att} />
+                    ))}
+                  </div>
+                )}
                 <div className={styles.dmTime}>{formatTs(msg.created_at)}</div>
               </div>
             </div>
@@ -178,17 +363,55 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
       </div>
 
       <div className={styles.dmInputArea}>
+        {emojiOpen && (
+          <div className={styles.dmEmojiPickerWrap}>
+            <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme} lazyLoadEmojis height={380} width={320} />
+          </div>
+        )}
+        {gifOpen && (
+          <div className={styles.dmGifPickerWrap} ref={gifPickerRef}>
+            <GiphyPicker onSelect={handleGifSelect} onClose={() => setGifOpen(false)} />
+          </div>
+        )}
+{emojiQuery !== null && emojiMatches.length > 0 && (
+          <div className={styles.dmEmojiShortcodeList}>
+            <div className={styles.dmEmojiShortcodeHeader}>Emoji matching :{emojiQuery}</div>
+            {emojiMatches.map((entry, i) => (
+              <button
+                key={entry.n}
+                className={`${styles.dmEmojiShortcodeItem} ${i === emojiIdx ? styles.dmEmojiShortcodeItemActive : ''}`}
+                onMouseDown={e => { e.preventDefault(); completeEmojiShortcode(entry); }}
+              >
+                <span className={styles.dmEmojiShortcodeGlyph}>{entry.e}</span>
+                <span className={styles.dmEmojiShortcodeName}>:{entry.n}:</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className={styles.dmInputCapsule}>
-          <input
-            className={styles.dmInput}
+          <input ref={inputRef} type="text" className={styles.dmInput}
             placeholder={`Message ${displayName}`}
             value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onBlur={() => setTimeout(() => setEmojiQuery(null), 150)}
             autoComplete="off"
           />
-          <button className={styles.dmSendBtn} onClick={handleSend} disabled={!input.trim()}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" transform="rotate(45)">
+          <button ref={emojiBtnRef} className={`${styles.dmActBtn} ${emojiOpen ? styles.dmActBtnActive : ''}`}
+            onClick={() => { setEmojiOpen(o => !o); setGifOpen(false); }} title="Emoji">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <line x1="9" y1="9" x2="9.01" y2="9"/>
+              <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+          </button>
+          <button ref={gifBtnRef} className={`${styles.dmActBtn} ${gifOpen ? styles.dmActBtnActive : ''}`}
+            onClick={() => { setGifOpen(o => !o); setEmojiOpen(false); }} title="GIF">
+            <span className={styles.dmGifLabel}>GIF</span>
+          </button>
+          <button className={`${styles.dmActBtn} ${styles.dmSendBtn}`} onClick={handleSend} disabled={!canSend}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" transform="rotate(45)">
               <line x1="12" y1="19" x2="12" y2="5"/>
               <polyline points="5 12 12 5 19 12"/>
             </svg>
@@ -713,9 +936,9 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
     const rawUrl = getDmUrl();
     if (!rawUrl) return;
 
-    // Guard against StrictMode double-invoke: if a WS already exists and is
-    // open/connecting, don't create another one.
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
+    // Guard against StrictMode double-invoke: skip if socket is CONNECTING,
+    // OPEN, or CLOSING — only recreate once fully CLOSED (readyState 3).
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.CLOSING) return;
 
     const wsUrl = rawUrl.replace(/^http/, 'ws');
     const token = getToken();

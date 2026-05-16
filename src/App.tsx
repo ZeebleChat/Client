@@ -107,11 +107,13 @@ export default function App() {
 
   const [memberGroups, setMemberGroups] = useState<ApiMemberGroup[]>([]);
 
-  const { voiceState, remoteFrames, joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreenShare, startScreenCapture, handleVoiceAudio, handleVoiceState, handleScreenFrame } = useVoice();
+  const { voiceState, remoteFrames, joinVoice, leaveVoice, toggleMute, toggleDeafen, toggleScreenShare, startScreenCapture, handleVoiceAudio, handleVoiceState, handleScreenFrame, clearRemoteFrames } = useVoice();
   const { streamState, startBroadcast, joinAsViewer, stopStream, handleStreamAudio, handleStreamEnded, toggleStreamMute: toggleStreamMuteInternal } = useStream();
   // channelId → broadcaster identity for all currently live streams
   const [liveStreams, setLiveStreams] = useState<Map<string, string>>(new Map());
   const voiceRoomParticipants = useVoiceRooms(!!activeServerUrl && authed && isZcloudUrl(activeServerUrl));
+  // Real-time voice presence tracked via WebSocket — works for all server types.
+  const [wsVoiceRoomMap, setWsVoiceRoomMap] = useState<Record<string, string[]>>({});
   const [serverBannerAttachmentId, setServerBannerAttachmentId] = useState<number | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
@@ -193,6 +195,24 @@ export default function App() {
     }
     if (event.type === 'voice_state') {
       handleVoiceState(event);
+      setWsVoiceRoomMap(prev => {
+        const ch = event.channel_id;
+        const current = prev[ch] ?? [];
+        if (event.action === 'join') {
+          if (current.includes(event.identity)) return prev;
+          return { ...prev, [ch]: [...current, event.identity] };
+        } else {
+          const next = current.filter(id => id !== event.identity);
+          if (next.length === 0) {
+            const { [ch]: _, ...rest } = prev;
+            return rest;
+          }
+          return { ...prev, [ch]: next };
+        }
+      });
+    }
+    if (event.type === 'voice_snapshot') {
+      setWsVoiceRoomMap(event.rooms);
     }
     if (event.type === 'stream_start') {
       setLiveStreams(prev => new Map(prev).set(event.channel_id, event.broadcaster));
@@ -200,6 +220,7 @@ export default function App() {
     if (event.type === 'stream_end') {
       setLiveStreams(prev => { const next = new Map(prev); next.delete(event.channel_id); return next; });
       handleStreamEnded();
+      clearRemoteFrames();
     }
     if (event.type === 'stream_started') {
       setStreamModalOpen(true);
@@ -207,7 +228,7 @@ export default function App() {
     if (event.type === 'stream_joined') {
       setStreamModalOpen(true);
     }
-  }, [handleVoiceState, handleStreamEnded]);
+  }, [handleVoiceState, handleStreamEnded, clearRemoteFrames]);
 
   const { send } = useWebSocket({
     serverUrl: activeServerUrl,
@@ -254,6 +275,7 @@ export default function App() {
     setActiveChannel(null);
     setMessages([]);
     setMemberGroups([]);
+    setWsVoiceRoomMap({});
 
     await exchangeToken(serverUrl);
 
@@ -481,7 +503,7 @@ export default function App() {
               activeVoiceChannelId={voiceState.channel?.id ?? null}
               activeVoiceChannelName={voiceState.channel?.name ?? null}
               voiceParticipants={voiceState.participants}
-              voiceRoomParticipants={voiceRoomParticipants}
+              voiceRoomParticipants={{ ...voiceRoomParticipants, ...wsVoiceRoomMap }}
               onSelectChannel={selectChannel}
               onJoinVoice={handleJoinVoice}
               onLeaveVoice={handleLeaveVoice}

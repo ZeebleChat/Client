@@ -298,7 +298,18 @@ export function useVoice() {
     let micStream: MediaStream;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          // @ts-expect-error — Chrome/WebView extended constraints
+          googEchoCancellation: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          googAutoGainControl: true,
+        },
       });
       if (connGenRef.current !== gen) { micStream.getTracks().forEach(t => t.stop()); return; }
       micStreamRef.current = micStream;
@@ -310,6 +321,7 @@ export function useVoice() {
 
     const ctx = new AudioContext({ sampleRate: 48000 });
     audioCtxRef.current = ctx;
+    await ctx.resume().catch(() => {});
 
     try {
       await ctx.audioWorklet.addModule('/mic-processor.js');
@@ -414,6 +426,11 @@ export function useVoice() {
     }
   }, []);
 
+  const clearRemoteFrames = useCallback(() => {
+    remoteFramesRef.current = new Map();
+    setRemoteFrames(new Map());
+  }, []);
+
   return {
     voiceState: state,
     remoteFrames,
@@ -426,5 +443,6 @@ export function useVoice() {
     handleVoiceAudio,
     handleVoiceState,
     handleScreenFrame,
+    clearRemoteFrames,
   };
 }

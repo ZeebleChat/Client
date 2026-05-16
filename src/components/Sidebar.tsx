@@ -949,15 +949,6 @@ export default function Sidebar({
                             ▶
                           </button>
                         )}
-                        {!hasStream && onStartStream && (
-                          <button
-                            className={styles.chGearBtn}
-                            title="Go live"
-                            onClick={e => { e.stopPropagation(); onStartStream(ch); }}
-                          >
-                            ◉
-                          </button>
-                        )}
                         <button
                           className={styles.chGearBtn}
                           title="Channel settings"
@@ -989,6 +980,19 @@ export default function Sidebar({
                               )}
                             </div>
                           ))}
+                          {/* People already in the channel before we joined — in wsVoiceRoomMap
+                              but not yet in voiceParticipants (no live status available). */}
+                          {polledIdentities
+                            .filter(id =>
+                              id !== getBeamIdentity() &&
+                              !(voiceParticipants ?? []).some(p => p.identity === id)
+                            )
+                            .map(id => (
+                              <div key={id} className={styles.vcUser}>
+                                <UserAvatar name={id} size={20} radius={6} className={styles.vcAvatar} />
+                                <span>{id}</span>
+                              </div>
+                            ))}
                         </div>
                       )}
                       {!isActiveVoice && hasPolledUsers && (

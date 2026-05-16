@@ -693,21 +693,23 @@
 .dmInputArea {
   padding: 0 24px 24px;
   flex-shrink: 0;
+  position: relative;
 }
 
 .dmInputCapsule {
-  background: var(--bg-panel);
-  border-radius: var(--radius-m);
+  background: var(--bg-main);
+  border-radius: var(--radius-l);
   box-shadow: var(--neu-in);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 12px;
+  padding: 14px 20px;
   border: var(--border-soft);
+  transition: box-shadow 0.2s;
 }
 
 .dmInputCapsule:focus-within {
-  box-shadow: var(--neu-in), 0 0 0 1px rgba(99, 102, 241, 0.2);
+  box-shadow: var(--neu-in), 0 0 0 1px var(--accent-glow);
 }
 
 .dmInput {
@@ -721,19 +723,221 @@
 
 .dmInput::placeholder { color: var(--text-3); }
 
-.dmSendBtn {
-  color: var(--accent);
+.dmActBtn {
+  color: var(--text-3);
   cursor: pointer;
+  transition: 0.2s;
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
   background: transparent;
   border: none;
 }
 
-.dmSendBtn:hover { transform: scale(1.15); }
-.dmSendBtn:disabled { opacity: 0.3; cursor: default; transform: none; }
+.dmActBtn:hover {
+  color: var(--text-1);
+  transform: scale(1.1);
+}
+
+.dmActBtnActive { color: var(--accent) !important; }
+
+.dmSendBtn { color: var(--accent); }
+.dmSendBtn:hover { color: var(--accent-h); }
+.dmActBtn:disabled { opacity: 0.3; cursor: default; transform: none; }
+
+.dmGifLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.dmEmojiPickerWrap {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 24px;
+  z-index: 100;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.dmGifPickerWrap {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 24px;
+  z-index: 100;
+}
+
+/* ── DM message attachments ───────────────────────────────────────────────── */
+
+.dmMsgAttachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.dmAttachImgLink { display: inline-block; }
+
+.dmAttachImg {
+  max-width: 320px;
+  max-height: 220px;
+  border-radius: var(--radius-s);
+  display: block;
+  cursor: zoom-in;
+}
+
+.dmAttachVideo {
+  max-width: 320px;
+  border-radius: var(--radius-s);
+  display: block;
+}
+
+.dmAttachAudio {
+  max-width: 320px;
+  width: 100%;
+  display: block;
+  border-radius: var(--radius-s);
+}
+
+.dmAttachFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-s);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-2);
+  box-shadow: var(--neu-out-sm);
+  max-width: 280px;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.dmAttachFile:hover { color: var(--text-1); }
+
+.dmAttachFile span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Pending attachment previews above DM input ───────────────────────────── */
+
+.dmAttachPreviews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 10px;
+}
+
+.dmAttachPreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-s);
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  box-shadow: var(--neu-out-sm);
+  max-width: 220px;
+}
+
+.dmAttachThumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.dmAttachName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.dmAttachRemove {
+  flex-shrink: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.dmAttachRemove:hover { color: var(--red); }
+
+.dmEmojiShortcodeList {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 24px;
+  background: var(--bg-panel);
+  border: var(--border-soft);
+  border-radius: var(--radius-m);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  min-width: 220px;
+  max-width: 320px;
+  z-index: 100;
+}
+
+.dmEmojiShortcodeHeader {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 4px 10px 2px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dmEmojiShortcodeItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-2);
+  border: none;
+  background: none;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.dmEmojiShortcodeItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-1);
+}
+
+.dmEmojiShortcodeItemActive {
+  background: rgba(99, 102, 241, 0.12) !important;
+  color: var(--accent) !important;
+}
+
+.dmEmojiShortcodeGlyph {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+}
+
+.dmEmojiShortcodeName {
+  font-size: 13px;
+  font-family: monospace;
+  color: inherit;
+}
 
 /* ── DmSidebar footer ──────────────────────────────────────────────────────── */
 

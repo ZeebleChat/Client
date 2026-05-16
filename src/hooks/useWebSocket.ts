@@ -16,6 +16,7 @@ export type WsEvent =
   | { type: 'channel_deleted'; channel_id: string | number }
   | { type: 'channel_renamed'; channel: ApiChannel }
   | { type: 'voice_state'; channel_id: string; identity: string; action: 'join' | 'leave' }
+  | { type: 'voice_snapshot'; rooms: Record<string, string[]> }
   | { type: 'voice_joined'; channel_id: string }
   | { type: 'stream_start'; channel_id: string; broadcaster: string }
   | { type: 'stream_end'; channel_id: string }
@@ -156,6 +157,14 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
           channel_id: msg.channel_id as string,
           identity: msg.identity as string,
           action: msg.action as 'join' | 'leave',
+        });
+        return;
+      }
+
+      if (msg.type === 'voice_snapshot') {
+        onEventRef.current({
+          type: 'voice_snapshot',
+          rooms: msg.rooms as Record<string, string[]>,
         });
         return;
       }
