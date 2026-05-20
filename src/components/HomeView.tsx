@@ -3,7 +3,7 @@
  * Shows friends list, direct messages, and DM conversation.
  * Includes WebSocket for real-time DM updates.
  */
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   fetchFriends,
@@ -13,6 +13,7 @@ import {
   fetchFriendRequests,
   fetchDMs,
   sendDM,
+  uploadDmFile,
   getDmAttachmentUrl,
   type ApiFriend,
   type ApiFriendRequest,
@@ -72,6 +73,28 @@ function formatTs(ts: number | string | null | undefined): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function getTimestampMs(ts: number | string | null | undefined): number {
+  if (ts == null) return 0;
+  if (typeof ts === 'number') return ts > 1e10 ? ts : ts * 1000;
+  const s = String(ts).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) { const n = parseFloat(s); return n > 1e10 ? n : n * 1000; }
+  return new Date(s.replace(' ', 'T')).getTime() || 0;
+}
+
+function isSameDay(a: number | string | null | undefined, b: number | string | null | undefined): boolean {
+  return new Date(getTimestampMs(a)).toDateString() === new Date(getTimestampMs(b)).toDateString();
+}
+
+function formatDateLabel(ts: number | string | null | undefined): string {
+  const d = new Date(getTimestampMs(ts));
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
 
@@ -115,13 +138,6 @@ function DmAttachmentView({ att }: { att: ApiAttachment }) {
   );
 }
 
-interface PendingFile {
-  file: File;
-  id?: string | number;
-  uploading: boolean;
-  previewUrl?: string;
-}
-
 function getEmojiPickerTheme(): Theme {
   return document.documentElement.getAttribute('data-theme') === 'light' ? Theme.LIGHT : Theme.DARK;
 }
@@ -134,6 +150,13 @@ interface DmPanelProps {
   ws: WebSocket | null;
 }
 
+interface PendingDmFile {
+  file: File;
+  id?: string | number;
+  uploading: boolean;
+  previewUrl?: string;
+}
+
 function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const [messages, setMessages] = useState<ApiDmMessage[]>([]);
   const [input, setInput] = useState('');
@@ -143,9 +166,11 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const [gifOpen, setGifOpen] = useState(false);
   const [emojiQuery, setEmojiQuery] = useState<string | null>(null);
   const [emojiIdx, setEmojiIdx] = useState(0);
+  const [pendingFiles, setPendingFiles] = useState<PendingDmFile[]>([]);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const gifBtnRef = useRef<HTMLButtonElement>(null);
   const gifPickerRef = useRef<HTMLDivElement>(null);
@@ -156,7 +181,16 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     return searchEmojis(emojiQuery, 8);
   }, [emojiQuery]);
 
-  const canSend = input.trim().length > 0;
+  const canSend = (input.trim().length > 0 || pendingFiles.some(f => !f.uploading && f.id != null)) && !pendingFiles.some(f => f.uploading);
+
+  const annotated = useMemo(() => messages.map((msg, i) => {
+    const prev = messages[i - 1];
+    const next = messages[i + 1];
+    const tsMs = getTimestampMs(msg.created_at);
+    const sameAsPrev = !!prev && prev.from === msg.from && (tsMs - getTimestampMs(prev.created_at)) < 5 * 60 * 1000;
+    const sameAsNext = !!next && next.from === msg.from && (getTimestampMs(next.created_at) - tsMs) < 5 * 60 * 1000;
+    return { ...msg, isFirst: !sameAsPrev, isLast: !sameAsNext, newDay: !prev || !isSameDay(prev.created_at, msg.created_at) };
+  }), [messages]);
 
   useEffect(() => {
     setLoading(true);
@@ -207,7 +241,10 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     return () => ws.removeEventListener('message', handler);
   }, [ws, beamIdentity]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
 
   useEffect(() => { if (emojiOpen) setEmojiPickerTheme(getEmojiPickerTheme()); }, [emojiOpen]);
 
@@ -236,10 +273,29 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [gifOpen]);
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    for (const file of files) {
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+      const entry: PendingDmFile = { file, uploading: true, previewUrl };
+      setPendingFiles(prev => [...prev, entry]);
+      const result = await uploadDmFile(file);
+      if (result.ok && result.id != null) {
+        setPendingFiles(prev => prev.map(f => f.file === file ? { ...f, id: result.id, uploading: false } : f));
+      } else {
+        setPendingFiles(prev => prev.filter(f => f.file !== file));
+      }
+    }
+  }
+
   async function handleSend() {
     const text = input.trim();
-    if (!text) return;
+    const ready = pendingFiles.filter(f => !f.uploading && f.id != null);
+    if (pendingFiles.some(f => f.uploading) || (!text && ready.length === 0)) return;
     setInput('');
+    setPendingFiles([]);
+    const attachmentIds = ready.map(f => f.id!);
     const optimistic: ApiDmMessage = {
       id: `opt-${Date.now()}`,
       from: myBeam,
@@ -248,7 +304,7 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
       created_at: Date.now() / 1000,
     };
     setMessages(prev => [...prev, optimistic]);
-    await sendDM(beamIdentity, text);
+    await sendDM(beamIdentity, text, attachmentIds);
   }
 
   function onEmojiClick(data: EmojiClickData) {
@@ -322,44 +378,63 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   return (
     <div className={styles.dmPanel}>
       <div className={styles.dmHeader}>
-        <UserAvatar name={displayName} size={32} />
-        <span className={styles.dmHeaderName}>{displayName}</span>
+        <UserAvatar name={displayName} size={36} />
+        <div className={styles.dmHeaderInfo}>
+          <span className={styles.dmHeaderName}>{displayName}</span>
+          <span className={styles.dmHeaderBeam}>{beamIdentity}</span>
+        </div>
       </div>
 
-      <div className={styles.dmMessages}>
+      <div className={styles.dmMessages} ref={messagesRef}>
         {loading && <div className={styles.emptyState}>Loading…</div>}
         {!loading && messages.length === 0 && (
-          <div className={styles.emptyState}>No messages yet. Say hello!</div>
+          <div className={styles.dmEmptyConv}>
+            <UserAvatar name={displayName} size={64} />
+            <div className={styles.dmEmptyName}>{displayName}</div>
+            <div className={styles.dmEmptyHint}>Start your conversation with {displayName}.</div>
+          </div>
         )}
-        {messages.map(msg => {
+        {annotated.map(msg => {
           const isMine = msg.from === myBeam;
+          const bubblePosClass =
+            msg.isFirst && msg.isLast ? styles.dmBubbleSingle :
+            msg.isFirst               ? styles.dmBubbleFirst :
+            msg.isLast                ? styles.dmBubbleLast :
+                                        styles.dmBubbleMiddle;
           return (
-            <div
-              key={String(msg.id)}
-              className={`${styles.dmMsgRow} ${isMine ? styles.dmMine : ''}`}
-            >
-              {!isMine && <UserAvatar name={msg.from} size={30} />}
-              <div className={styles.dmBubble}>
+            <Fragment key={String(msg.id)}>
+              {msg.newDay && (
+                <div className={styles.dateDivider}>
+                  <span>{formatDateLabel(msg.created_at)}</span>
+                </div>
+              )}
+              <div className={`${styles.dmMsgRow} ${isMine ? styles.dmMine : ''} ${!msg.isFirst ? styles.dmMsgGrouped : ''}`}>
                 {!isMine && (
-                  <div className={styles.dmSender}>{msg.from}</div>
-                )}
-                {isGifUrl(msg.content)
-                  ? <img src={msg.content} alt="GIF" className={styles.dmAttachImg} />
-                  : msg.content && <div className={styles.dmText}>{msg.content}</div>
-                }
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className={styles.dmMsgAttachments}>
-                    {msg.attachments.map(att => (
-                      <DmAttachmentView key={String(att.id)} att={att} />
-                    ))}
+                  <div className={styles.dmAvatarSlot}>
+                    {msg.isLast && <UserAvatar name={msg.from} size={28} />}
                   </div>
                 )}
-                <div className={styles.dmTime}>{formatTs(msg.created_at)}</div>
+                <div className={`${styles.dmBubble} ${bubblePosClass}`}>
+                  {!isMine && msg.isFirst && (
+                    <div className={styles.dmSender}>{msg.from}</div>
+                  )}
+                  {isGifUrl(msg.content)
+                    ? <img src={msg.content} alt="GIF" className={styles.dmAttachImg} />
+                    : msg.content && <div className={styles.dmText}>{msg.content}</div>
+                  }
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className={styles.dmMsgAttachments}>
+                      {msg.attachments.map(att => (
+                        <DmAttachmentView key={String(att.id)} att={att} />
+                      ))}
+                    </div>
+                  )}
+                  {msg.isLast && <div className={styles.dmTime}>{formatTs(msg.created_at)}</div>}
+                </div>
               </div>
-            </div>
+            </Fragment>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       <div className={styles.dmInputArea}>
@@ -388,7 +463,35 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
             ))}
           </div>
         )}
+        {pendingFiles.length > 0 && (
+          <div className={styles.dmAttachPreviews}>
+            {pendingFiles.map((pf, i) => (
+              <div key={i} className={styles.dmAttachPreview}>
+                {pf.previewUrl && <img src={pf.previewUrl} alt={pf.file.name} className={styles.dmAttachThumb} />}
+                <span className={styles.dmAttachName}>{pf.file.name}</span>
+                {pf.uploading
+                  ? <span style={{ fontSize: 11, color: 'var(--text-3)' }}>uploading…</span>
+                  : <button className={styles.dmAttachRemove} onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}>×</button>
+                }
+              </div>
+            ))}
+          </div>
+        )}
         <div className={styles.dmInputCapsule}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileSelect}
+          />
+          <button className={styles.dmActBtn} onClick={() => fileInputRef.current?.click()} title="Attach file">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="16"/>
+              <line x1="8" y1="12" x2="16" y2="12"/>
+            </svg>
+          </button>
           <input ref={inputRef} type="text" className={styles.dmInput}
             placeholder={`Message ${displayName}`}
             value={input}
@@ -936,10 +1039,6 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
     const rawUrl = getDmUrl();
     if (!rawUrl) return;
 
-    // Guard against StrictMode double-invoke: skip if socket is CONNECTING,
-    // OPEN, or CLOSING — only recreate once fully CLOSED (readyState 3).
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.CLOSING) return;
-
     const wsUrl = rawUrl.replace(/^http/, 'ws');
     const token = getToken();
     const url = `${wsUrl}/ws?token=${encodeURIComponent(token ?? '')}`;
@@ -947,9 +1046,7 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      setDmWs(ws);
-    };
+    ws.onopen = () => { setDmWs(ws); };
 
     ws.onmessage = (e) => {
       try {
@@ -974,10 +1071,9 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
       }
     };
 
-    ws.onerror = () => { /* silently ignore */ };
+    ws.onerror = () => {};
 
     ws.onclose = () => {
-      // Only clear state if this is still the current socket
       if (wsRef.current === ws) {
         wsRef.current = null;
         setDmWs(null);
@@ -985,11 +1081,21 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
     };
 
     return () => {
-      // Close the socket but do NOT null wsRef here.
-      // The readyState will become CLOSING (2), which causes the guard on the
-      // next mount to skip past <= OPEN (1) and create a fresh socket.
-      // onclose will handle nulling wsRef when the close completes.
-      ws.close();
+      // Null wsRef immediately so the next mount creates a fresh socket.
+      if (wsRef.current === ws) wsRef.current = null;
+      // Detach all handlers to prevent stale state updates.
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      setDmWs(null);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      } else if (ws.readyState === WebSocket.CONNECTING) {
+        // Defer close until connected to avoid the browser error
+        // "WebSocket closed before connection was established".
+        ws.addEventListener('open', () => ws.close(), { once: true });
+      }
     };
   }, []);
 

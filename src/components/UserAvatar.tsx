@@ -6,8 +6,10 @@
  */
 import { useState, useEffect } from 'react';
 import { getAuthAttachmentUrl } from '../api';
-import { getAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCache';
+import { getAvatarCache, setAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCache';
 import styles from './UserAvatar.module.css';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface Props {
 name: string | null | undefined;
@@ -40,7 +42,13 @@ export default function UserAvatar({ name, avatarId, size = 36, radius = 12, sty
   }, [safeName, avatarId]);
 
   // Use explicit avatarId, then fall back to cache
-  const resolvedId = avatarId !== undefined ? avatarId : getAvatarCache(safeName);
+  const rawId = avatarId !== undefined ? avatarId : getAvatarCache(safeName);
+  // After migration 0017, zbeam attachment IDs are UUIDs. Stale integer IDs
+  // cached before the migration would cause a 400 — evict them and show initials.
+  const resolvedId = rawId && UUID_RE.test(rawId) ? rawId : null;
+  if (rawId && !resolvedId && avatarId === undefined) {
+    setAvatarCache(safeName, null);
+  }
 
   const containerStyle: React.CSSProperties = {
     width: size,

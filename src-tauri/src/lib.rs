@@ -302,7 +302,41 @@ fn stop_screen_capture(state: State<CaptureState>) {
     }
 }
 
-// ── Local packs commands ─────────────────────────────────────────────────────
+// ── OS keychain commands ──────────────────────────────────────────────────────
+
+const KEYRING_SERVICE: &str = "xyz.zeeble.desktop";
+
+#[tauri::command]
+fn save_credential(key: String, value: String) -> Result<(), String> {
+    keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| e.to_string())?
+        .set_password(&value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_credential(key: String) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn delete_credential(key: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// ── Local packs commands ──────────────────────────────────────────────────────
 
 /// Returns all subdirectory names inside <appDataDir>/packs/.
 /// Creates the directory if it doesn't exist.
@@ -382,6 +416,9 @@ pub fn run() {
             stop_screen_capture,
             list_local_packs,
             get_packs_dir,
+            save_credential,
+            load_credential,
+            delete_credential,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

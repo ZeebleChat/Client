@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import EmojiPicker, { type EmojiClickData, Theme } from 'emoji-picker-react';
-import TenorPicker from './TenorPicker';
+import GiphyPicker from './GiphyPicker';
 import { uploadFile, getRoleColor } from '../api';
 import UserAvatar from './UserAvatar';
 import { searchEmojis, type EmojiEntry } from './emojiData';
@@ -36,6 +36,7 @@ interface PendingFile {
   id?: string | number;
   uploading: boolean;
   previewUrl?: string;
+  error?: string;
 }
 
 function getTheme(): Theme {
@@ -133,15 +134,22 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
   }
 
   async function uploadAndStage(file: File) {
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
     const previewUrl = file.type.startsWith('image/') || file.type.startsWith('video/')
       ? URL.createObjectURL(file) : undefined;
+    if (file.size > MAX_FILE_SIZE) {
+      setPendingFiles(prev => [...prev, { file, uploading: false, previewUrl, error: 'File exceeds 10 MB limit' }]);
+      return;
+    }
     const entry: PendingFile = { file, uploading: true, previewUrl };
     setPendingFiles(prev => [...prev, entry]);
     const result = await uploadFile(file);
     if (result.ok && result.id != null) {
       setPendingFiles(prev => prev.map(f => f.file === file ? { ...f, id: result.id, uploading: false } : f));
     } else {
-      setPendingFiles(prev => prev.filter(f => f.file !== file));
+      setPendingFiles(prev => prev.map(f => f.file === file
+        ? { ...f, uploading: false, error: result.error ?? 'Upload failed' }
+        : f));
     }
   }
 
@@ -316,13 +324,13 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
       )}
       {gifOpen && (
         <div className={styles.gifPickerWrap} ref={gifPickerRef}>
-          <TenorPicker onSelect={handleGifSelect} />
+          <GiphyPicker onSelect={handleGifSelect} onClose={() => setGifOpen(false)} />
         </div>
       )}
       {pendingFiles.length > 0 && (
         <div className={styles.attachPreviews}>
           {pendingFiles.map((f, i) => (
-            <div key={i} className={styles.attachPreview}>
+            <div key={i} className={`${styles.attachPreview}${f.error ? ` ${styles.attachPreviewError}` : ''}`}>
               {f.previewUrl
                 ? <img src={f.previewUrl} className={styles.attachThumb} alt={f.file.name} />
                 : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -330,7 +338,9 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
                     <polyline points="14 2 14 8 20 8"/>
                   </svg>
               }
-              <span className={styles.attachName}>{f.uploading ? 'Uploading…' : f.file.name}</span>
+              <span className={styles.attachName} title={f.error}>
+                {f.uploading ? 'Uploading…' : f.error ? f.error : f.file.name}
+              </span>
               <button className={styles.attachRemove} onClick={() => removePending(f.file)}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>

@@ -30,6 +30,7 @@ import {
   fetchCategoryPermissions,
   setCategoryPermission,
   deleteCategoryPermission,
+  fetchOwnerSettings,
   type ApiCategory,
   type ApiChannel,
   type ApiMemberGroup,
@@ -37,6 +38,7 @@ import {
   type ServerInvite,
   type ChannelPerm,
   type CategoryPerm,
+  type OwnerSettings,
 } from '../api';
 import { getBeamIdentity } from '../auth';
 import { getServerUrl } from '../config';
@@ -49,7 +51,7 @@ interface Props {
   initialTab?: Tab;
 }
 
-type Tab = 'overview' | 'categories' | 'channels' | 'roles' | 'invites';
+type Tab = 'overview' | 'categories' | 'channels' | 'roles' | 'invites' | 'admin';
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
@@ -124,7 +126,7 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
       setIconUploading(false);
       return;
     }
-    const patch = await patchServerSettings({ logo_attachment_id: Number(up.id) });
+    const patch = await patchServerSettings({ logo_attachment_id: String(up.id) });
     setIconUploading(false);
     if (!patch.ok) {
       setIconErr(patch.error ?? 'Failed to set icon');
@@ -154,7 +156,7 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
       setBannerUploading(false);
       return;
     }
-    const patch = await patchServerSettings({ banner_attachment_id: Number(up.id) });
+    const patch = await patchServerSettings({ banner_attachment_id: String(up.id) });
     setBannerUploading(false);
     if (!patch.ok) {
       setBannerErr(patch.error ?? 'Failed to set banner');
@@ -1152,6 +1154,418 @@ function InvitesTab({ isOwner }: { isOwner: boolean }) {
 
 // ── Modal shell ───────────────────────────────────────────────────────────────
 
+// ── Shared mini-components ────────────────────────────────────────────────────
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && onChange(!checked)}
+      style={{
+        width: 36, height: 20, borderRadius: 10, padding: 0, border: 'none',
+        background: checked ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        position: 'relative', flexShrink: 0, transition: 'background 0.2s',
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 2, left: checked ? 18 : 2,
+        width: 16, height: 16, borderRadius: 8, background: '#fff',
+        transition: 'left 0.2s', display: 'block',
+      }} />
+    </button>
+  );
+}
+
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-1)', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</div>
+        {hint && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{hint}</div>}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+type SaveState = 'idle' | 'saving' | 'ok' | 'err';
+
+function SaveRow({ state, err, onSave, disabled }: { state: SaveState; err: string; onSave: () => void; disabled?: boolean }) {
+  return (
+    <div className={styles.rowEnd} style={{ marginTop: 10 }}>
+      {state === 'ok'  && <span className={styles.feedbackOk}>Saved!</span>}
+      {state === 'err' && <span className={styles.feedbackErr}>{err}</span>}
+      <button
+        className={`${styles.btn} ${styles.btnAccent} ${(state === 'saving' || disabled) ? styles.btnDisabled : ''}`}
+        onClick={onSave}
+        disabled={state === 'saving' || disabled}
+      >
+        {state === 'saving' ? 'Saving…' : 'Save'}
+      </button>
+    </div>
+  );
+}
+
+// ── Admin Tab ─────────────────────────────────────────────────────────────────
+
+function AdminTab({ isOwner }: { isOwner: boolean }) {
+  const [loading,  setLoading]  = useState(true);
+  const [loadErr,  setLoadErr]  = useState('');
+
+  // ── Server Info ───────────────────────────────────────────────────────────
+  const [about,     setAbout]     = useState('');
+  const [publicUrl, setPublicUrl] = useState('');
+  const [infoSave,  setInfoSave]  = useState<SaveState>('idle');
+  const [infoErr,   setInfoErr]   = useState('');
+
+  // ── Members ───────────────────────────────────────────────────────────────
+  const [allowNewMembers,      setAllowNewMembers]      = useState(true);
+  const [maxMembers,           setMaxMembers]           = useState('0');
+  const [minAccountAgeDays,    setMinAccountAgeDays]    = useState('0');
+  const [requireEmailVerified, setRequireEmailVerified] = useState(false);
+  const [requirePhoneVerified, setRequirePhoneVerified] = useState(false);
+  const [memberSave, setMemberSave] = useState<SaveState>('idle');
+  const [memberErr,  setMemberErr]  = useState('');
+
+  // ── Content ───────────────────────────────────────────────────────────────
+  const [maxMessageLength, setMaxMessageLength] = useState('4000');
+  const [maxUploadSize,    setMaxUploadSize]    = useState('8MB');
+  const [allowBots,        setAllowBots]        = useState(true);
+  const [contentSave, setContentSave] = useState<SaveState>('idle');
+  const [contentErr,  setContentErr]  = useState('');
+
+  // ── Invites ───────────────────────────────────────────────────────────────
+  const [invitesAnyoneCanCreate,    setInvitesAnyoneCanCreate]    = useState(true);
+  const [defaultInviteExpiryHours,  setDefaultInviteExpiryHours]  = useState('0');
+  const [defaultInviteMaxUses,      setDefaultInviteMaxUses]      = useState('0');
+  const [inviteSave, setInviteSave] = useState<SaveState>('idle');
+  const [inviteErr,  setInviteErr]  = useState('');
+
+  // ── Access Control ────────────────────────────────────────────────────────
+  const [requireAge18,          setRequireAge18]          = useState(false);
+  const [requireAgeGmail,       setRequireAgeGmail]       = useState(false);
+  const [requireAgeId,          setRequireAgeId]          = useState(false);
+  const [requirePhoneAccess,    setRequirePhoneAccess]    = useState(false);
+  const [identityWhitelist,     setIdentityWhitelist]     = useState('');
+  const [identityBlacklist,     setIdentityBlacklist]     = useState('');
+  const [allowedEmailDomains,   setAllowedEmailDomains]   = useState('');
+  const [accessSave, setAccessSave] = useState<SaveState>('idle');
+  const [accessErr,  setAccessErr]  = useState('');
+
+  useEffect(() => {
+    fetchOwnerSettings().then((s: OwnerSettings | null) => {
+      if (!s) { setLoadErr('Could not load settings. Are you the server owner?'); setLoading(false); return; }
+      setAbout(s.about ?? '');
+      setPublicUrl(s.public_url);
+      setAllowNewMembers(s.allow_new_members);
+      setMaxMembers(String(s.max_members));
+      setMinAccountAgeDays(String(s.min_account_age_days));
+      setRequireEmailVerified(s.require_email_verified);
+      setRequirePhoneVerified(s.require_phone_verified);
+      setMaxMessageLength(String(s.max_message_length));
+      setMaxUploadSize(s.max_upload_size);
+      setAllowBots(s.allow_bots);
+      setInvitesAnyoneCanCreate(s.invites_anyone_can_create);
+      setDefaultInviteExpiryHours(String(s.default_invite_expiry_hours));
+      setDefaultInviteMaxUses(String(s.default_invite_max_uses));
+      setRequireAge18(s.require_age_18_plus);
+      setRequireAgeGmail(s.age_proof_methods.includes('gmail'));
+      setRequireAgeId(s.age_proof_methods.includes('id'));
+      setRequirePhoneAccess(s.require_phone_verified);
+      setIdentityWhitelist(s.identity_whitelist.join('\n'));
+      setIdentityBlacklist(s.identity_blacklist.join('\n'));
+      setAllowedEmailDomains(s.allowed_email_domains.join('\n'));
+      setLoading(false);
+    });
+  }, []);
+
+  async function save(
+    patch: Record<string, unknown>,
+    setSave: (s: SaveState) => void,
+    setErr: (e: string) => void,
+  ) {
+    setSave('saving');
+    const res = await patchServerSettings(patch);
+    if (res.ok) {
+      setSave('ok');
+      setTimeout(() => setSave('idle'), 1800);
+    } else {
+      setErr(res.error ?? 'Failed to save');
+      setSave('err');
+      setTimeout(() => setSave('idle'), 2500);
+    }
+  }
+
+  function parseList(text: string): string[] {
+    return text.split('\n').map(s => s.trim()).filter(Boolean);
+  }
+
+  if (loading)  return <div className={styles.content}><div className={styles.emptyHint}>Loading settings…</div></div>;
+  if (loadErr)  return <div className={styles.content}><div className={styles.emptyHint} style={{ color: 'var(--red)' }}>{loadErr}</div></div>;
+
+  const inputStyle: React.CSSProperties = { width: '100%', boxSizing: 'border-box' };
+  const textareaStyle: React.CSSProperties = { ...inputStyle, height: 130, resize: 'vertical', fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 14 };
+  const numberInputStyle: React.CSSProperties = { width: 140, textAlign: 'right' };
+
+  return (
+    <div className={styles.content}>
+      {!isOwner && <OwnerNotice />}
+
+      {/* ── Server Info ── */}
+      <div className={styles.sectionTitle}>Server Info</div>
+
+      <SettingRow label="About" hint="Short description shown on the server info page">
+        <span />
+      </SettingRow>
+      <textarea
+        className={styles.input}
+        style={textareaStyle}
+        value={about}
+        onChange={e => setAbout(e.target.value)}
+        placeholder="A chill place to hang out."
+        disabled={!isOwner}
+      />
+
+      <SettingRow label="Public URL" hint="The URL clients use to reach this server (used in invites and CORS)">
+        <span />
+      </SettingRow>
+      <input
+        className={styles.input}
+        style={inputStyle}
+        value={publicUrl}
+        onChange={e => setPublicUrl(e.target.value)}
+        placeholder="https://yourdomain.com"
+        disabled={!isOwner}
+      />
+
+      {isOwner && (
+        <SaveRow
+          state={infoSave}
+          err={infoErr}
+          onSave={() => save({ about: about.trim() || null, public_url: publicUrl.trim() }, setInfoSave, setInfoErr)}
+        />
+      )}
+
+      <div style={{ height: 8 }} />
+
+      {/* ── Members ── */}
+      <div className={styles.sectionTitle}>Members</div>
+
+      <SettingRow label="Allow new members" hint="Turn off to prevent anyone from joining">
+        <Toggle checked={allowNewMembers} onChange={setAllowNewMembers} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Max members" hint="Maximum number of members (0 = unlimited)">
+        <input
+          className={styles.input}
+          style={numberInputStyle}
+          type="number" min={0}
+          value={maxMembers}
+          onChange={e => setMaxMembers(e.target.value)}
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      <SettingRow label="Minimum account age (days)" hint="Reject accounts younger than this (0 = no requirement)">
+        <input
+          className={styles.input}
+          style={numberInputStyle}
+          type="number" min={0}
+          value={minAccountAgeDays}
+          onChange={e => setMinAccountAgeDays(e.target.value)}
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      <SettingRow label="Require verified email" hint="Only allow users with a verified email address">
+        <Toggle checked={requireEmailVerified} onChange={setRequireEmailVerified} disabled={!isOwner} />
+      </SettingRow>
+
+      {isOwner && (
+        <SaveRow
+          state={memberSave}
+          err={memberErr}
+          onSave={() => save({
+            allow_new_members:      allowNewMembers,
+            max_members:            Number(maxMembers)         || 0,
+            min_account_age_days:   Number(minAccountAgeDays)  || 0,
+            require_email_verified: requireEmailVerified,
+          }, setMemberSave, setMemberErr)}
+        />
+      )}
+
+      <div style={{ height: 8 }} />
+
+      {/* ── Content & Limits ── */}
+      <div className={styles.sectionTitle}>Content & Limits</div>
+
+      <SettingRow label="Max message length (characters)">
+        <input
+          className={styles.input}
+          style={numberInputStyle}
+          type="number" min={1}
+          value={maxMessageLength}
+          onChange={e => setMaxMessageLength(e.target.value)}
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      <SettingRow label="Max upload size" hint='e.g. "8MB", "500KB", "2GB"'>
+        <input
+          className={styles.input}
+          style={{ width: 115, textAlign: 'right' }}
+          value={maxUploadSize}
+          onChange={e => setMaxUploadSize(e.target.value)}
+          placeholder="8MB"
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      <SettingRow label="Allow bots" hint="Let bot accounts connect using bot tokens">
+        <Toggle checked={allowBots} onChange={setAllowBots} disabled={!isOwner} />
+      </SettingRow>
+
+      {isOwner && (
+        <SaveRow
+          state={contentSave}
+          err={contentErr}
+          onSave={() => save({
+            max_message_length: Number(maxMessageLength) || 4000,
+            max_upload_size:    maxUploadSize.trim(),
+            allow_bots:         allowBots,
+          }, setContentSave, setContentErr)}
+        />
+      )}
+
+      <div style={{ height: 8 }} />
+
+      {/* ── Invite Defaults ── */}
+      <div className={styles.sectionTitle}>Invite Defaults</div>
+
+      <SettingRow label="Anyone can create invites" hint="When off, only the owner can create invite links">
+        <Toggle checked={invitesAnyoneCanCreate} onChange={setInvitesAnyoneCanCreate} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Default expiry (hours)" hint="0 = never expires">
+        <input
+          className={styles.input}
+          style={numberInputStyle}
+          type="number" min={0}
+          value={defaultInviteExpiryHours}
+          onChange={e => setDefaultInviteExpiryHours(e.target.value)}
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      <SettingRow label="Default max uses" hint="0 = unlimited uses">
+        <input
+          className={styles.input}
+          style={numberInputStyle}
+          type="number" min={0}
+          value={defaultInviteMaxUses}
+          onChange={e => setDefaultInviteMaxUses(e.target.value)}
+          disabled={!isOwner}
+        />
+      </SettingRow>
+
+      {isOwner && (
+        <SaveRow
+          state={inviteSave}
+          err={inviteErr}
+          onSave={() => save({
+            invites_anyone_can_create:   invitesAnyoneCanCreate,
+            default_invite_expiry_hours: Number(defaultInviteExpiryHours) || 0,
+            default_invite_max_uses:     Number(defaultInviteMaxUses)     || 0,
+          }, setInviteSave, setInviteErr)}
+        />
+      )}
+
+      <div style={{ height: 8 }} />
+
+      {/* ── Access Control ── */}
+      <div className={styles.sectionTitle}>Access Control</div>
+
+      <SettingRow label="18+ server" hint="Require users to confirm they are 18 or older to join">
+        <Toggle checked={requireAge18} onChange={setRequireAge18} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Require 18+ Gmail verification" hint="Only allow users whose age (18+) was verified via their Google account">
+        <Toggle checked={requireAgeGmail} onChange={setRequireAgeGmail} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Require 18+ ID verification" hint="Only allow users whose age (18+) was verified with a government-issued ID">
+        <Toggle checked={requireAgeId} onChange={setRequireAgeId} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Require phone verification" hint="Only allow users with a verified phone number linked to their account">
+        <Toggle checked={requirePhoneAccess} onChange={setRequirePhoneAccess} disabled={!isOwner} />
+      </SettingRow>
+
+      <SettingRow label="Allowed email domains" hint="One domain per line — empty = any domain. Requires verified email.">
+        <span />
+      </SettingRow>
+      <textarea
+        className={styles.input}
+        style={textareaStyle}
+        value={allowedEmailDomains}
+        onChange={e => setAllowedEmailDomains(e.target.value)}
+        placeholder={"example.com\nmyschool.edu"}
+        disabled={!isOwner}
+      />
+
+      <SettingRow label="Identity whitelist" hint="One beam identity per line — only these users can join (leave empty for open)">
+        <span />
+      </SettingRow>
+      <textarea
+        className={styles.input}
+        style={textareaStyle}
+        value={identityWhitelist}
+        onChange={e => setIdentityWhitelist(e.target.value)}
+        placeholder={"alice»ab12\nbob»cd34"}
+        disabled={!isOwner}
+      />
+
+      <SettingRow label="Identity blacklist" hint="One beam identity per line — these users are always denied, even with an invite">
+        <span />
+      </SettingRow>
+      <textarea
+        className={styles.input}
+        style={textareaStyle}
+        value={identityBlacklist}
+        onChange={e => setIdentityBlacklist(e.target.value)}
+        placeholder={"spammer»xx99"}
+        disabled={!isOwner}
+      />
+
+      {isOwner && (
+        <SaveRow
+          state={accessSave}
+          err={accessErr}
+          onSave={() => {
+            const ageMethods: string[] = [];
+            if (requireAgeGmail) ageMethods.push('gmail');
+            if (requireAgeId)    ageMethods.push('id');
+            save({
+              require_age_18_plus:    requireAge18,
+              require_phone_verified: requirePhoneAccess,
+              age_proof_methods:      ageMethods,
+              allowed_email_domains:  parseList(allowedEmailDomains),
+              identity_whitelist:     parseList(identityWhitelist),
+              identity_blacklist:     parseList(identityBlacklist),
+            }, setAccessSave, setAccessErr);
+          }}
+        />
+      )}
+
+      <div style={{ height: 16 }} />
+    </div>
+  );
+}
+
+// ── Main modal ────────────────────────────────────────────────────────────────
+
 export default function ServerSettingsModal({ serverName, onClose, onRefresh, initialTab }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'overview');
   const [isOwner, setIsOwner] = useState(false);
@@ -1165,13 +1579,14 @@ export default function ServerSettingsModal({ serverName, onClose, onRefresh, in
     });
   }, []);
 
-  const NAV_ITEMS: { id: Tab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
+  const NAV_ITEMS: { id: Tab; label: string; ownerOnly?: boolean }[] = [
+    { id: 'overview',   label: 'Overview' },
     { id: 'categories', label: 'Categories' },
-    { id: 'channels', label: 'Channels' },
-    { id: 'roles', label: 'Roles' },
-    { id: 'invites', label: 'Invites' },
-  ];
+    { id: 'channels',   label: 'Channels' },
+    { id: 'roles',      label: 'Roles' },
+    { id: 'invites',    label: 'Invites' },
+    { id: 'admin',      label: 'Admin Settings', ownerOnly: true },
+  ].filter(item => !item.ownerOnly || isOwner);
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
@@ -1220,6 +1635,9 @@ export default function ServerSettingsModal({ serverName, onClose, onRefresh, in
           )}
           {tab === 'invites' && (
             <InvitesTab isOwner={isOwner} />
+          )}
+          {tab === 'admin' && (
+            <AdminTab isOwner={isOwner} />
           )}
         </div>
       </div>

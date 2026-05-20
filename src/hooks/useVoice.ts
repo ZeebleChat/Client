@@ -302,13 +302,13 @@ export function useVoice() {
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           // @ts-expect-error — Chrome/WebView extended constraints
           googEchoCancellation: true,
-          googNoiseSuppression: true,
-          googHighpassFilter: true,
-          googAutoGainControl: true,
+          googNoiseSuppression: false,
+          googHighpassFilter: false,
+          googAutoGainControl: false,
         },
       });
       if (connGenRef.current !== gen) { micStream.getTracks().forEach(t => t.stop()); return; }

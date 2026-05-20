@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -24,9 +25,8 @@ export default defineConfig({
     },
     proxy: {
       '/zb-api': {
-        target: 'https://api.zeeble.xyz',
+        target: 'http://localhost:8001',
         changeOrigin: true,
-        secure: false,
         rewrite: (path) => path.replace(/^\/zb-api/, ''),
       },
       '/zb-cloud': {
@@ -46,6 +46,13 @@ export default defineConfig({
 
   // Expose VITE_ and TAURI_ENV_ prefixed env vars to the frontend
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
+
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    exclude: ['**/node_modules/**', '**/src-tauri/**'],
+  },
 
   build: {
     // Tauri requires a modern target; adjust per platform

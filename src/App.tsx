@@ -11,6 +11,9 @@ import {
   getAccountInfo,
   leaveCloudServer,
   deleteCloudServer,
+  tryAutoLogin,
+  startTokenRefreshTimer,
+  stopTokenRefreshTimer,
   type ApiServer,
   type ApiChannel,
   type ApiMessage,
@@ -18,7 +21,7 @@ import {
 } from './api';
 import { isZcloudUrl } from './config';
 import { setAvatarCache } from './avatarCache';
-import { isAuthenticated, forceLogout } from './auth';
+import { forceLogout } from './auth';
 import { getBeamIdentity } from './auth';
 import type { SidebarCategory } from './types';
 import { useWebSocket, buildChatMessagePayload } from './hooks/useWebSocket';
@@ -62,7 +65,16 @@ export default function App() {
       (window as unknown as Record<string, unknown>).__pack = resourcePack;
     }
   }, [resourcePack]);
-  const [authed, setAuthed] = useState(isAuthenticated());
+  const [authed, setAuthed] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    tryAutoLogin()
+      .then(ok => { if (ok) setAuthed(true); })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // In Tauri the permission compat layer handles everything at the OS level —
   // mark setup done immediately so the PermissionsSetup screen never appears.
@@ -114,7 +126,8 @@ export default function App() {
   const voiceRoomParticipants = useVoiceRooms(!!activeServerUrl && authed && isZcloudUrl(activeServerUrl));
   // Real-time voice presence tracked via WebSocket — works for all server types.
   const [wsVoiceRoomMap, setWsVoiceRoomMap] = useState<Record<string, string[]>>({});
-  const [serverBannerAttachmentId, setServerBannerAttachmentId] = useState<number | null>(null);
+  const [serverBannerAttachmentId, setServerBannerAttachmentId] = useState<string | null>(null);
+  const [serverOwnerBeamIdentity, setServerOwnerBeamIdentity] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [streamModalOpen, setStreamModalOpen] = useState(false);
@@ -246,6 +259,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authed) {
+      startTokenRefreshTimer();
+    } else {
+      stopTokenRefreshTimer();
+    }
+  }, [authed]);
+
+  useEffect(() => {
     if (!authed) return;
     fetchServers().then(setServers);
     getAccountInfo().then(info => {
@@ -264,7 +285,7 @@ export default function App() {
     setMessages([]);
     setMessagesLoading(true);
     setMobileSidebarOpen(false);
-    const msgs = await fetchMessages(channel.id);
+    const { messages: msgs } = await fetchMessages(channel.id);
     setMessages(msgs);
     setMessagesLoading(false);
   }, []);
@@ -275,6 +296,8 @@ export default function App() {
     setActiveChannel(null);
     setMessages([]);
     setMemberGroups([]);
+    setServerOwnerBeamIdentity(null);
+    setServerBannerAttachmentId(null);
     setWsVoiceRoomMap({});
 
     await exchangeToken(serverUrl);
@@ -292,7 +315,10 @@ export default function App() {
     setChannels(chs);
     setApiCategories(cats);
     setMemberGroups(mems);
-    fetchServerInfo(serverUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
+    fetchServerInfo(serverUrl).then(info => {
+      setServerBannerAttachmentId(info?.banner_attachment_id ?? null);
+      setServerOwnerBeamIdentity(info?.owner_beam_identity ?? null);
+    });
 
     const first = chs.find(ch => ch.type === 'text');
     if (first) selectChannel(first);
@@ -313,7 +339,10 @@ export default function App() {
       setChannels(chs);
       setApiCategories(cats);
       setMemberGroups(mems);
-      fetchServerInfo(activeServerUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
+      fetchServerInfo(activeServerUrl).then(info => {
+        setServerBannerAttachmentId(info?.banner_attachment_id ?? null);
+        setServerOwnerBeamIdentity(info?.owner_beam_identity ?? null);
+      });
       const first = chs.find(ch => ch.type === 'text');
       if (first) selectChannel(first);
     })();
@@ -426,6 +455,8 @@ export default function App() {
     return srv?.server_name ?? localStorage.getItem('active_server_name') ?? 'Server';
   }, [servers, activeServerUrl]);
 
+  if (!authChecked) return <TitleBar />;
+
   if (!authed) {
     return (
       <>
@@ -526,7 +557,11 @@ export default function App() {
                 setApiCategories(cats);
               }}
               isCloudServer={isZcloudUrl(activeServerUrl)}
-              isOwner={memberGroups.flatMap(g => g.users ?? []).find(u => u.name === getBeamIdentity())?.is_owner ?? false}
+              isOwner={
+                serverOwnerBeamIdentity != null
+                  ? serverOwnerBeamIdentity === getBeamIdentity()
+                  : memberGroups.flatMap(g => g.users ?? []).find(u => u.name === getBeamIdentity())?.is_owner ?? false
+              }
               onLeaveServer={async () => {
                 const result = await leaveCloudServer(activeServerUrl);
                 if (result.ok) {
@@ -624,7 +659,10 @@ export default function App() {
               setChannels(chs);
               setApiCategories(cats);
               setMemberGroups(mems);
-              fetchServerInfo(activeServerUrl).then(info => setServerBannerAttachmentId(info?.banner_attachment_id ?? null));
+              fetchServerInfo(activeServerUrl).then(info => {
+                setServerBannerAttachmentId(info?.banner_attachment_id ?? null);
+                setServerOwnerBeamIdentity(info?.owner_beam_identity ?? null);
+              });
             }}
           />
         )}

@@ -8,6 +8,8 @@ import {
   forceLogout,
   saveSession,
   getBeamIdentity,
+  loadPersistedSession,
+  persistSession,
 } from './auth';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -34,9 +36,16 @@ let refreshPromiseTyped: Promise<RefreshResult> | null = null;
 
 async function refreshAccessToken(): Promise<RefreshResult> {
   if (refreshInProgressTyped && refreshPromiseTyped) return refreshPromiseTyped;
-  const refreshToken = getRefreshToken();
-  const uid = getUid();
-  if (!refreshToken || !uid) return 'auth_error';
+  let refreshToken = getRefreshToken();
+  let uid = getUid();
+  // In-memory credentials can be wiped by HMR in development — try keychain before giving up.
+  if (!refreshToken || !uid) {
+    const restored = await loadPersistedSession();
+    if (!restored) return 'auth_error';
+    refreshToken = getRefreshToken();
+    uid = getUid();
+    if (!refreshToken || !uid) return 'auth_error';
+  }
 
   refreshInProgressTyped = true;
   refreshPromiseTyped = (async () => {
@@ -62,6 +71,46 @@ async function refreshAccessToken(): Promise<RefreshResult> {
     }
   })();
   return refreshPromiseTyped;
+}
+
+/**
+ * Called on app startup. Loads persisted refresh credentials, exchanges them for
+ * a fresh access token, and re-persists the rotated refresh token.
+ * Returns true if the user is now authenticated without needing to log in.
+ */
+export async function tryAutoLogin(): Promise<boolean> {
+  if (!(await loadPersistedSession())) return false;
+  const result = await refreshAccessToken();
+  if (result === 'refreshed') {
+    await persistSession();
+    return true;
+  }
+  return false;
+}
+
+// ── Proactive token refresh ───────────────────────────────────────────────────
+// Refresh 3 minutes before the 15-minute expiry so WebSocket reconnects always
+// have a valid token even when the user is idle (no HTTP requests firing).
+const PROACTIVE_REFRESH_INTERVAL_MS = 12 * 60 * 1000;
+
+let _refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startTokenRefreshTimer(): void {
+  if (_refreshTimer !== null) return;
+  _refreshTimer = setInterval(async () => {
+    const result = await refreshAccessToken();
+    if (result === 'auth_error') {
+      stopTokenRefreshTimer();
+      forceLogout();
+    }
+  }, PROACTIVE_REFRESH_INTERVAL_MS);
+}
+
+export function stopTokenRefreshTimer(): void {
+  if (_refreshTimer !== null) {
+    clearInterval(_refreshTimer);
+    _refreshTimer = null;
+  }
 }
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -238,13 +287,13 @@ export interface ServerInfo {
   owner_beam_identity?: string;
   public_url?: string;
   about?: string;
-  logo_attachment_id?: number | null;
-  banner_attachment_id?: number | null;
+  logo_attachment_id?: string | null;
+  banner_attachment_id?: string | null;
 }
 
-export function getServerAttachmentUrl(serverUrl: string, attachmentId: number | string): string {
+export function getServerAttachmentUrl(serverUrl: string, attachmentId: string): string {
   const token = getChatToken(serverUrl) ?? getToken();
-  return `${serverUrl}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+  return `${serverUrl}/v1/attachments/${encodeURIComponent(attachmentId)}?token=${encodeURIComponent(token ?? '')}`;
 }
 
 export async function fetchServerInfo(serverUrl: string): Promise<ServerInfo | null> {
@@ -312,34 +361,87 @@ export interface ApiMessage {
   edited_at?: string | null;
 }
 
-export async function fetchMessages(channelId: string | number): Promise<ApiMessage[]> {
-  try {
-    const res = await authedFetch(
-      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/messages`
-    );
-    if (!res.ok) return [];
-    return unwrapArray<ApiMessage>(await res.json(), 'messages');
-  } catch { return []; }
+export interface MessagePage {
+  messages: ApiMessage[];
+  has_more: boolean;
 }
 
-export async function fetchBoardPosts(channelId: string | number): Promise<ApiMessage[]> {
+export async function fetchMessages(
+  channelId: string | number,
+  opts: { before?: string; limit?: number } = {},
+): Promise<MessagePage> {
   try {
+    const params = new URLSearchParams();
+    if (opts.before) params.set('before', opts.before);
+    if (opts.limit != null) params.set('limit', String(opts.limit));
+    const query = params.toString() ? `?${params}` : '';
     const res = await authedFetch(
-      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts`
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/messages${query}`
     );
-    if (!res.ok) return [];
-    return unwrapArray<ApiMessage>(await res.json(), 'posts');
-  } catch { return []; }
+    if (!res.ok) return { messages: [], has_more: false };
+    const data = await res.json();
+    return {
+      messages: unwrapArray<ApiMessage>(data, 'messages'),
+      has_more: data?.has_more === true,
+    };
+  } catch { return { messages: [], has_more: false }; }
 }
 
-export async function fetchPostReplies(channelId: string | number, postId: string | number): Promise<ApiMessage[]> {
+export interface PostPage {
+  posts: ApiMessage[];
+  has_more: boolean;
+  offset: number;
+}
+
+export async function fetchBoardPosts(
+  channelId: string | number,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<PostPage> {
   try {
+    const params = new URLSearchParams();
+    if (opts.limit != null) params.set('limit', String(opts.limit));
+    if (opts.offset != null) params.set('offset', String(opts.offset));
+    const query = params.toString() ? `?${params}` : '';
     const res = await authedFetch(
-      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts/${encodeURIComponent(String(postId))}/replies`
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts${query}`
     );
-    if (!res.ok) return [];
-    return unwrapArray<ApiMessage>(await res.json(), 'replies');
-  } catch { return []; }
+    if (!res.ok) return { posts: [], has_more: false, offset: opts.offset ?? 0 };
+    const data = await res.json();
+    return {
+      posts: unwrapArray<ApiMessage>(data, 'posts'),
+      has_more: data?.has_more === true,
+      offset: data?.offset ?? opts.offset ?? 0,
+    };
+  } catch { return { posts: [], has_more: false, offset: opts.offset ?? 0 }; }
+}
+
+export interface ReplyPage {
+  replies: ApiMessage[];
+  has_more: boolean;
+  offset: number;
+}
+
+export async function fetchPostReplies(
+  channelId: string | number,
+  postId: string | number,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<ReplyPage> {
+  try {
+    const params = new URLSearchParams();
+    if (opts.limit != null) params.set('limit', String(opts.limit));
+    if (opts.offset != null) params.set('offset', String(opts.offset));
+    const query = params.toString() ? `?${params}` : '';
+    const res = await authedFetch(
+      `${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/posts/${encodeURIComponent(String(postId))}/replies${query}`
+    );
+    if (!res.ok) return { replies: [], has_more: false, offset: opts.offset ?? 0 };
+    const data = await res.json();
+    return {
+      replies: unwrapArray<ApiMessage>(data, 'replies'),
+      has_more: data?.has_more === true,
+      offset: data?.offset ?? opts.offset ?? 0,
+    };
+  } catch { return { replies: [], has_more: false, offset: opts.offset ?? 0 }; }
 }
 
 // ── Members ───────────────────────────────────────────────────────────────────
@@ -357,9 +459,15 @@ export interface ApiMemberGroup {
   users: ApiMemberUser[];
 }
 
-export async function fetchMembers(): Promise<ApiMemberGroup[]> {
+export async function fetchMembers(
+  opts: { limit?: number; offset?: number } = {},
+): Promise<ApiMemberGroup[]> {
   try {
-    const res = await authedFetch(`${getServerUrl()}/v1/members`);
+    const params = new URLSearchParams();
+    if (opts.limit != null) params.set('limit', String(opts.limit));
+    if (opts.offset != null) params.set('offset', String(opts.offset));
+    const query = params.toString() ? `?${params}` : '';
+    const res = await authedFetch(`${getServerUrl()}/v1/members${query}`);
     if (!res.ok) return [];
     const raw = unwrapArray<unknown>(await res.json(), 'members');
     return normalizeFlatMembers(raw);
@@ -375,7 +483,7 @@ function normalizeFlatMembers(members: unknown[]): ApiMemberGroup[] {
     const online = flat.filter(m => m.status === 'online');
     const offline = flat.filter(m => m.status !== 'online');
     const toUser = (m: typeof flat[0]): ApiMemberUser => ({
-      name: m.display_name?.trim() || m.beam_identity,
+      name: m.beam_identity,
       role: m.role ?? null,
       status: m.status,
       avatar: m.avatar != null ? String(m.avatar) : null,
@@ -547,6 +655,39 @@ export async function deleteCloudServer(serverUrl: string): Promise<{ ok: boolea
 
 // ── Server settings ───────────────────────────────────────────────────────────
 
+export interface OwnerSettings {
+  server_name: string;
+  public_url: string;
+  owner_beam_identity: string;
+  about: string | null;
+  max_message_length: number;
+  max_upload_size: string;
+  invites_anyone_can_create: boolean;
+  default_invite_expiry_hours: number;
+  default_invite_max_uses: number;
+  allow_new_members: boolean;
+  logo_attachment_id: number | null;
+  banner_attachment_id: number | null;
+  require_email_verified: boolean;
+  require_phone_verified: boolean;
+  require_age_18_plus: boolean;
+  age_proof_methods: string[];
+  allow_bots: boolean;
+  min_account_age_days: number;
+  identity_whitelist: string[];
+  identity_blacklist: string[];
+  allowed_email_domains: string[];
+  max_members: number;
+}
+
+export async function fetchOwnerSettings(): Promise<OwnerSettings | null> {
+  try {
+    const res = await authedFetch(`${getServerUrl()}/v1/server/settings`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch { return null; }
+}
+
 export async function patchServerSettings(settings: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await authedFetch(`${getServerUrl()}/v1/server/settings`, {
@@ -603,13 +744,7 @@ export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string
     const form = new FormData();
     form.append('file0', file);
     const base = getServerUrl();
-    const token = getChatToken(base) ?? getToken() ?? '';
-    // Bare fetch to avoid extra headers that may interfere with multipart parsing
-    const res = await fetch(`${base}/v1/upload`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
+    const res = await authedFetch(`${base}/v1/upload`, { method: 'POST', body: form });
     const data = await safeJson(res);
     if (!res.ok) return { ok: false, error: (data.error as string) || 'Upload failed' };
     if (Array.isArray(data.attachments)) {
@@ -639,7 +774,29 @@ export async function uploadDmFile(file: File): Promise<{ ok: boolean; id?: stri
       body: form,
     });
     const data = await safeJson(res);
-    if (!res.ok) return { ok: false, error: (data.error as string) || 'Upload failed' };
+    if (!res.ok) {
+      if (res.status === 401) {
+        const refreshResult = await refreshAccessToken();
+        if (refreshResult === 'refreshed') {
+          const retryToken = getToken() ?? '';
+          const retry = await fetch(`${base}/v1/upload`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${retryToken}` },
+            body: form,
+          });
+          const retryData = await safeJson(retry);
+          if (!retry.ok) return { ok: false, error: (retryData.error as string) || 'Upload failed' };
+          if (Array.isArray(retryData.attachments)) {
+            const first = (retryData.attachments as Record<string, unknown>[])[0];
+            return { ok: true, id: first?.attachment_id as string | number };
+          }
+          if (retryData.id != null) return { ok: true, id: retryData.id as string | number };
+          return { ok: false, error: 'Unexpected upload response' };
+        }
+        if (refreshResult === 'auth_error') forceLogout();
+      }
+      return { ok: false, error: (data.error as string) || 'Upload failed' };
+    }
     if (Array.isArray(data.attachments)) {
       const first = (data.attachments as Record<string, unknown>[])[0];
       return { ok: true, id: first?.attachment_id as string | number };
@@ -890,7 +1047,7 @@ export interface ApiFriend {
   display_name?: string;
   status?: string;
   created_at?: string;
-  avatar_attachment_id?: string | number | null;
+  avatar_attachment_id?: string | null;
 }
 
 export interface ApiFriendRequest {
@@ -1001,7 +1158,9 @@ export async function fetchDMs(withBeam: string, limit = 100): Promise<ApiDmMess
     if (!res.ok) return [];
     const data = await res.json();
     const arr: unknown[] = Array.isArray(data) ? data : (data.messages ?? data.dms ?? []);
-    return arr.map(m => normaliseDm(m as Record<string, unknown>));
+    return arr
+      .map(m => normaliseDm(m as Record<string, unknown>))
+      .sort((a, b) => new Date(String(a.created_at)).getTime() - new Date(String(b.created_at)).getTime());
   } catch { return []; }
 }
 
@@ -1198,7 +1357,7 @@ export async function uploadAvatar(file: File): Promise<{ ok: boolean; avatar_at
 }
 
 export function getAuthAttachmentUrl(attachmentId: string): string {
-  return `${getAuthUrl()}/attachments/${attachmentId}?token=${encodeURIComponent(getToken())}`;
+  return `${getAuthUrl()}/attachments/${attachmentId}`;
 }
 
 export async function uploadBanner(file: File): Promise<{ ok: boolean; banner_attachment_id?: string; error?: string }> {
@@ -1618,7 +1777,7 @@ export interface StaffMember {
   staff_role: string;
   staff_note: string | null;
   staff_added_at: string | null;
-  avatar_attachment_id: number | null;
+  avatar_attachment_id: string | null;
 }
 
 export async function adminListStaff(): Promise<StaffMember[]> {

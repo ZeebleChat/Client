@@ -38,7 +38,7 @@ export default function GiphyPicker({ onSelect, onClose }: Props) {
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [, setHasMore] = useState(true);
 
   const offsetRef = useRef(0);
   const loadingMoreRef = useRef(false);
@@ -106,7 +106,10 @@ export default function GiphyPicker({ onSelect, onClose }: Props) {
       const { data } = term
         ? await gf.search(term, { limit: LIMIT, offset: off, rating: 'g', type: m })
         : await gf.trending({ limit: LIMIT, offset: off, rating: 'g', type: m });
-      setResults(prev => [...prev, ...data.map(toResult)]);
+      setResults(prev => {
+        const seen = new Set(prev.map(r => r.id));
+        return [...prev, ...data.map(toResult).filter(r => !seen.has(r.id))];
+      });
       offsetRef.current = off + LIMIT;
       const more = data.length === LIMIT;
       setHasMore(more);

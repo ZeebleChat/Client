@@ -176,13 +176,15 @@
   background: var(--bg-main);
   border: var(--border-soft);
   border-radius: var(--radius-s);
-  padding: 9px 13px;
-  font-size: 13px;
+  padding: 12px 16px;
+  font-size: 14px;
   font-family: 'Plus Jakarta Sans', sans-serif;
   color: var(--text-1);
   box-shadow: var(--neu-in-sm);
   transition: border-color 0.2s;
   outline: none;
+  min-height: 44px;
+  box-sizing: border-box;
 }
 
 .input:focus {

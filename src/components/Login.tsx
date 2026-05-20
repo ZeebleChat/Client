@@ -6,7 +6,7 @@
  */
 import { useState, type FormEvent } from 'react';
 import { loginReq, registerReq, redeemPromoReq, sendEmailPinReq, verifyEmailPinReq, sendPasswordResetPinReq, resetPasswordWithPinReq } from '../api';
-import { saveSession } from '../auth';
+import { saveSession, persistSession } from '../auth';
 import styles from './Login.module.css';
 import TosModal from './TosModal';
 
@@ -34,6 +34,7 @@ export default function Login({ onLogin }: Props) {
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinLoading, setPinLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   // Forgot password flow
   // Forgot password flow
@@ -109,6 +110,7 @@ export default function Login({ onLogin }: Props) {
       }
 
       saveSession(result.data);
+      if (rememberMe) await persistSession();
       onLogin();
     } catch {
       setError('Connection failed — please try again');
@@ -129,7 +131,10 @@ export default function Login({ onLogin }: Props) {
       return;
     }
     // Verified — complete sign-up
-    if (pendingSession) saveSession(pendingSession);
+    if (pendingSession) {
+      saveSession(pendingSession);
+      if (rememberMe) await persistSession();
+    }
     onLogin();
   }
 
@@ -452,6 +457,18 @@ export default function Login({ onLogin }: Props) {
               <button type="button" className={styles.tosLink} onClick={() => setTosModalOpen(true)}>
                 Terms of Service
               </button>
+            </label>
+          )}
+
+          {!isRegister && (
+            <label className={styles.tosLabel}>
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                className={styles.tosCheckbox}
+              />
+              Stay logged in
             </label>
           )}
 

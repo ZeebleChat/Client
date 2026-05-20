@@ -120,7 +120,7 @@ export function useStream() {
     let micStream: MediaStream;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: false, autoGainControl: false },
       });
       if (connGenRef.current !== gen) { micStream.getTracks().forEach(t => t.stop()); return; }
       micStreamRef.current = micStream;

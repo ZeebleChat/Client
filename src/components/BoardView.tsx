@@ -115,7 +115,7 @@ function ThreadView({
 
   useEffect(() => {
     setLoading(true);
-    fetchPostReplies(channelId, post.id).then(r => {
+    fetchPostReplies(channelId, post.id).then(({ replies: r }) => {
       setReplies(r);
       setLoading(false);
     });
@@ -232,7 +232,7 @@ export default function BoardView({ channelId, channelName, liveMessages, onCrea
   useEffect(() => {
     setSelectedPost(null);
     setLoading(true);
-    fetchBoardPosts(channelId).then(p => {
+    fetchBoardPosts(channelId).then(({ posts: p }) => {
       setPosts(p);
       setLoading(false);
     });

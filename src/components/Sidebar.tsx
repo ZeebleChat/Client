@@ -48,7 +48,7 @@ interface Props {
   onLeaveServer?: () => Promise<{ ok: boolean; error?: string }>;
   onDeleteServer?: (password: string) => Promise<{ ok: boolean; error?: string }>;
   mobileOpen?: boolean;
-  bannerAttachmentId?: number | null;
+  bannerAttachmentId?: string | null;
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -501,7 +501,7 @@ export default function Sidebar({
   serverName, categories, activeChannelId, activeVoiceChannelId, activeVoiceChannelName,
   voiceParticipants, voiceRoomParticipants,
   onSelectChannel, onJoinVoice, onLeaveVoice,
-  liveStreamChannels, onStartStream, onJoinStream,
+  liveStreamChannels, onStartStream: _onStartStream, onJoinStream,
   voiceMuted, voiceDeafened, onToggleMute, onToggleDeafen,
   onOpenServerSettings, onOpenInvites, onRefresh,
   onToggleScreenShare, isScreenSharing,
@@ -512,6 +512,9 @@ export default function Sidebar({
   const identity = getBeamIdentity();
 
   // ── Leave / delete modal ──────────────────────────────────────────────────
+  const [bannerLoadFailed, setBannerLoadFailed] = useState(false);
+  useEffect(() => { setBannerLoadFailed(false); }, [bannerAttachmentId]);
+
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
   const [leavePassword, setLeavePassword] = useState('');
   const [leaveError, setLeaveError] = useState('');
@@ -733,13 +736,13 @@ export default function Sidebar({
   return (
     <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.mobileOpen}` : ''}`}>
       {/* Server banner */}
-      {bannerAttachmentId && (
+      {bannerAttachmentId && !bannerLoadFailed && (
         <div className={styles.banner}>
           <img
             src={getServerAttachmentUrl(getServerUrl(), bannerAttachmentId)}
             alt=""
             className={styles.bannerImg}
-            onError={e => { (e.target as HTMLImageElement).closest('.' + styles.banner)?.remove(); }}
+            onError={() => setBannerLoadFailed(true)}
           />
         </div>
       )}
