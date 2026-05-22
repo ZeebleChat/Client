@@ -22,7 +22,7 @@ import {
   deleteCustomRole,
   reorderCustomRoles,
   uploadFile,
-  getServerAttachmentUrl,
+  fetchServerAttachment,
   fetchChannels,
   fetchChannelPermissions,
   setChannelPermission,
@@ -82,12 +82,14 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
 
   // Load current icon and banner on mount
   useEffect(() => {
-    fetchServerInfo(getServerUrl()).then(info => {
+    fetchServerInfo(getServerUrl()).then(async info => {
       if (info?.logo_attachment_id) {
-        setIconUrl(getServerAttachmentUrl(getServerUrl(), info.logo_attachment_id));
+        const res = await fetchServerAttachment(getServerUrl(), info.logo_attachment_id);
+        if (res.ok) setIconUrl(URL.createObjectURL(await res.blob()));
       }
       if (info?.banner_attachment_id) {
-        setBannerUrl(getServerAttachmentUrl(getServerUrl(), info.banner_attachment_id));
+        const res = await fetchServerAttachment(getServerUrl(), info.banner_attachment_id);
+        if (res.ok) setBannerUrl(URL.createObjectURL(await res.blob()));
       }
     });
   }, []);
@@ -131,7 +133,9 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
     if (!patch.ok) {
       setIconErr(patch.error ?? 'Failed to set icon');
     } else {
-      setIconUrl(getServerAttachmentUrl(getServerUrl(), up.id));
+      fetchServerAttachment(getServerUrl(), up.id).then(async r => {
+        if (r.ok) setIconUrl(URL.createObjectURL(await r.blob()));
+      });
       onRefresh();
     }
     // Reset input so same file can be re-selected
@@ -161,7 +165,6 @@ function OverviewTab({ serverName, onRefresh, isOwner }: { serverName: string; o
     if (!patch.ok) {
       setBannerErr(patch.error ?? 'Failed to set banner');
     } else {
-      setBannerUrl(getServerAttachmentUrl(getServerUrl(), up.id));
       onRefresh();
     }
     if (bannerInputRef.current) bannerInputRef.current.value = '';

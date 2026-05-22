@@ -11,7 +11,24 @@ export interface NotifItem {
 
 type Listener = (items: NotifItem[]) => void;
 
-let items: NotifItem[] = [];
+const STORAGE_KEY = 'zbl_notif_items';
+
+function loadItems(): NotifItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function persist(items: NotifItem[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {}
+}
+
+let items: NotifItem[] = loadItems();
 const listeners = new Set<Listener>();
 
 function emit() {
@@ -31,6 +48,7 @@ export function addNotification(item: Omit<NotifItem, 'id' | 'timestamp' | 'read
     { ...item, id: `${now}-${Math.random().toString(36).slice(2)}`, timestamp: now, read: false },
     ...items,
   ].slice(0, 50);
+  persist(items);
   emit();
 }
 
@@ -40,7 +58,13 @@ export function markRead(type: NotifType) {
     if (i.type === type && !i.read) { changed = true; return { ...i, read: true }; }
     return i;
   });
-  if (changed) emit();
+  if (changed) { persist(items); emit(); }
+}
+
+export function clearPingsForChannel(channelTitle: string) {
+  const before = items.length;
+  items = items.filter(i => !(i.type === 'ping' && i.title === channelTitle));
+  if (items.length !== before) { persist(items); emit(); }
 }
 
 export function getUnreadCount(): number {

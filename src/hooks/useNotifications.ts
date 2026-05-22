@@ -33,13 +33,9 @@ export function useNotifications() {
       notify(`#${channelName}`, content.slice(0, 100), `ch-${msgChannelId}`);
     }
 
-    if (isMention) {
-      addNotification({
-        type: 'ping',
-        title: `#${channelName}`,
-        body: content.slice(0, 120),
-      });
-    } else if (notifAllMsg) {
+    // Note: ping bell entries for @mentions are added in App.tsx using the
+    // server-confirmed mentions array, so we only need to handle notifAllMsg here.
+    if (notifAllMsg) {
       addNotification({
         type: 'ping',
         title: `#${channelName}`,
@@ -60,5 +56,14 @@ export function useNotifications() {
     });
   }, [notify]);
 
-  return { notify, notifyMessage, notifyDm };
+  const notifyFriendRequest = useCallback((fromBeam: string) => {
+    notify(`Friend request from ${fromBeam}`, 'Wants to be friends', `fr-${fromBeam}`);
+    addNotification({
+      type: 'friend-request',
+      title: fromBeam,
+      body: 'Sent you a friend request',
+    });
+  }, [notify]);
+
+  return { notify, notifyMessage, notifyDm, notifyFriendRequest };
 }

@@ -319,7 +319,7 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
               </div>
             </div>
           )}
-          <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme} lazyLoadEmojis height={380} width={320} />
+          <EmojiPicker onEmojiClick={onEmojiClick} theme={emojiPickerTheme} height={380} width={320} />
         </div>
       )}
       {gifOpen && (

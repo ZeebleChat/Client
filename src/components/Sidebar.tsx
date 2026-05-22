@@ -12,7 +12,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import type { SidebarCategory } from '../types';
 import type { ApiChannel } from '../api';
 import type { Participant } from '../hooks/useVoice';
-import { createChannel, updateCategory, deleteCategory, updateChannelPosition, renameChannel, deleteChannel, loginReq, getServerAttachmentUrl } from '../api';
+import { createChannel, updateCategory, deleteCategory, updateChannelPosition, renameChannel, deleteChannel, loginReq, fetchServerAttachment } from '../api';
+import { useAttachmentBlobUrl } from '../hooks/useAttachmentBlobUrl';
 import { getServerUrl } from '../config';
 import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
@@ -49,6 +50,8 @@ interface Props {
   onDeleteServer?: (password: string) => Promise<{ ok: boolean; error?: string }>;
   mobileOpen?: boolean;
   bannerAttachmentId?: string | null;
+  unreadChannelIds?: Set<string>;
+  mentionCounts?: Record<string, number>;
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -507,13 +510,15 @@ export default function Sidebar({
   onToggleScreenShare, isScreenSharing,
   voiceStatus, voiceErrorMsg,
   isOwner, isCloudServer, onLeaveServer, onDeleteServer,
-  mobileOpen, bannerAttachmentId,
+  mobileOpen, bannerAttachmentId, unreadChannelIds, mentionCounts,
 }: Props) {
   const identity = getBeamIdentity();
 
   // ── Leave / delete modal ──────────────────────────────────────────────────
-  const [bannerLoadFailed, setBannerLoadFailed] = useState(false);
-  useEffect(() => { setBannerLoadFailed(false); }, [bannerAttachmentId]);
+  const bannerBlobUrl = useAttachmentBlobUrl(
+    bannerAttachmentId ?? null,
+    (id) => fetchServerAttachment(getServerUrl(), id),
+  );
 
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
   const [leavePassword, setLeavePassword] = useState('');
@@ -736,14 +741,9 @@ export default function Sidebar({
   return (
     <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.mobileOpen}` : ''}`}>
       {/* Server banner */}
-      {bannerAttachmentId && !bannerLoadFailed && (
+      {bannerBlobUrl && (
         <div className={styles.banner}>
-          <img
-            src={getServerAttachmentUrl(getServerUrl(), bannerAttachmentId)}
-            alt=""
-            className={styles.bannerImg}
-            onError={() => setBannerLoadFailed(true)}
-          />
+          <img src={bannerBlobUrl} alt="" className={styles.bannerImg} />
         </div>
       )}
       {/* Header */}
@@ -870,6 +870,8 @@ export default function Sidebar({
               <div className={`${styles.chGroup} ${isCollapsed ? styles.collapsed : ''}`}>
                 {cat.textChannels.map(ch => {
                   const isActive = String(ch.id) === String(activeChannelId);
+                  const mentionCount = !isActive ? (mentionCounts?.[String(ch.id)] ?? 0) : 0;
+                  const isUnread = !isActive && (unreadChannelIds?.has(String(ch.id)) ?? false);
                   const isDragChTarget = String(dragOverChId) === String(ch.id);
                   const settingsOpen = String(chSettings) === String(ch.id);
                   return (
@@ -878,7 +880,7 @@ export default function Sidebar({
                         role="button"
                         tabIndex={0}
                         draggable
-                        className={`${styles.chItem} ${isActive ? styles.active : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
+                        className={`${styles.chItem} ${isActive ? styles.active : ''} ${mentionCount > 0 ? styles.mentioned : isUnread ? styles.unread : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
                         onClick={() => onSelectChannel(ch)}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChannel(ch); } }}
                         onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
@@ -890,6 +892,9 @@ export default function Sidebar({
                         <GripIcon />
                         <HashIcon />
                         <span className={styles.chName}>{ch.name}</span>
+                        {mentionCount > 0 && (
+                          <span className={styles.mentionBadge}>{mentionCount}</span>
+                        )}
                         <button
                           className={styles.chGearBtn}
                           title="Channel settings"
@@ -1063,6 +1068,8 @@ export default function Sidebar({
                 })}
                 {cat.boardChannels.map(ch => {
                   const isActive = String(ch.id) === String(activeChannelId);
+                  const mentionCount = !isActive ? (mentionCounts?.[String(ch.id)] ?? 0) : 0;
+                  const isUnread = !isActive && (unreadChannelIds?.has(String(ch.id)) ?? false);
                   const isDragChTarget = String(dragOverChId) === String(ch.id);
                   const settingsOpen = String(chSettings) === String(ch.id);
                   return (
@@ -1071,7 +1078,7 @@ export default function Sidebar({
                         role="button"
                         tabIndex={0}
                         draggable
-                        className={`${styles.chItem} ${isActive ? styles.active : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
+                        className={`${styles.chItem} ${isActive ? styles.active : ''} ${mentionCount > 0 ? styles.mentioned : isUnread ? styles.unread : ''} ${isDragChTarget ? styles.chDragOver : ''}`}
                         onClick={() => onSelectChannel(ch)}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectChannel(ch); } }}
                         onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, ch }); }}
@@ -1083,6 +1090,9 @@ export default function Sidebar({
                         <GripIcon />
                         <BoardIcon />
                         <span className={styles.chName}>{ch.name}</span>
+                        {mentionCount > 0 && (
+                          <span className={styles.mentionBadge}>{mentionCount}</span>
+                        )}
                         <button
                           className={styles.chGearBtn}
                           title="Channel settings"

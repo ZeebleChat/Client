@@ -72,6 +72,15 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
     const url = getWsUrl();
     if (!url || !/^wss?:\/\//.test(url)) return;
 
+    // Guard: if we don't have a token yet (startup race with tryAutoLogin),
+    // don't open a doomed connection that triggers exponential backoff.
+    // Poll every 500 ms until the token lands, then connect immediately.
+    const earlyToken = getChatToken(getServerUrl()) || getToken();
+    if (!earlyToken) {
+      reconnectTimer.current = setTimeout(connect, 500);
+      return;
+    }
+
     const gen = connGenRef.current;
     const ws = new WebSocket(url);
     wsRef.current = ws;
@@ -220,7 +229,24 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
   useEffect(() => {
     shouldReconnect.current = true;
     connect();
+
+    // When the window comes back into view (user clicks the app, switches
+    // back from another window, un-minimises) any pending reconnect timer
+    // may have been throttled by the OS/browser.  Reset the backoff and
+    // reconnect immediately so notifications resume without delay.
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        reconnectDelay.current = WS_RECONNECT_INITIAL_DELAY_MS;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisible);
       connGenRef.current += 1;
       shouldReconnect.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);

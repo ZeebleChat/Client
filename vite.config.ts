@@ -16,6 +16,14 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: host || false,
+    // These headers cannot be set via HTML meta tags — they must come from the
+    // HTTP server. Set them here for the dev server, and mirror them on any
+    // production web server (nginx, caddy, etc.) that serves the built dist/.
+    headers: {
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+    },
     hmr: host
       ? { protocol: 'ws', host, port: 5183 }
       : undefined,

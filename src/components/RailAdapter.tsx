@@ -5,8 +5,8 @@
  */
 import { useState, useEffect, useRef, type MouseEvent } from 'react';
 import type { ApiServer } from '../api';
-import { getServerAttachmentUrl } from '../api';
-import { getChatToken } from '../auth';
+import { fetchServerAttachment } from '../api';
+import { getChatToken, getToken } from '../auth';
 import styles from './Rail.module.css';
 import railStyles from './RailAdapter.module.css';
 
@@ -21,6 +21,7 @@ interface Props {
   onOpenAccount?: () => void;
   onLeaveServer?: (serverUrl: string) => void;
   onCommunity?: () => void;
+  serverNotifMap?: Record<string, { hasUnread: boolean; hasMention: boolean }>;
 }
 
 interface ContextMenuState {
@@ -45,12 +46,16 @@ const HEALTH_INTERVAL = 30_000;
 
 async function pingServer(url: string): Promise<boolean> {
   try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+    const token = getChatToken(url) ?? getToken();
+    const res = await fetch(`${url}/health`, {
+      signal: AbortSignal.timeout(5000),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     return res.ok;
   } catch { return false; }
 }
 
-export default function RailAdapter({ servers, activeServerUrl, view, onSelectServer, onHome, onLeaveServer, onAddServer, onCommunity }: Props) {
+export default function RailAdapter({ servers, activeServerUrl, view, onSelectServer, onHome, onLeaveServer, onAddServer, onCommunity, serverNotifMap = {} }: Props) {
   const [icons, setIcons] = useState<Record<string, string | null>>({});
   const [offlineServers, setOfflineServers] = useState<Set<string>>(new Set());
   const offlineRef = useRef<Set<string>>(new Set());
@@ -66,11 +71,16 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
           return;
         }
         try {
-          const res = await fetch(`${server.server_url}/v1/server/info`, { signal: AbortSignal.timeout(4000) });
+          const token = getChatToken(server.server_url) ?? getToken();
+          const res = await fetch(`${server.server_url}/v1/server/info`, {
+            signal: AbortSignal.timeout(4000),
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
           if (!res.ok) { _iconCache.set(server.server_url, null); updates[server.server_url] = null; return; }
           const info = await res.json();
           if (info.logo_attachment_id) {
-            const url = getServerAttachmentUrl(server.server_url, info.logo_attachment_id);
+            const res = await fetchServerAttachment(server.server_url, info.logo_attachment_id);
+            const url = res.ok ? URL.createObjectURL(await res.blob()) : null;
             _iconCache.set(server.server_url, url);
             updates[server.server_url] = url;
           } else {
@@ -117,12 +127,14 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
     serverUrl: '',
     serverName: '',
   });
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   // Close context menu on click outside
   useEffect(() => {
     if (!contextMenu.visible) return;
     function handleClick() {
       setContextMenu(prev => ({ ...prev, visible: false }));
+      setConfirmLeave(false);
     }
     // Delay to avoid immediate close on right-click
     const timer = setTimeout(() => {
@@ -140,6 +152,7 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setContextMenu(prev => ({ ...prev, visible: false }));
+        setConfirmLeave(false);
       }
     }
     document.addEventListener('keydown', handleKeyDown);
@@ -149,6 +162,7 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
   function handleContextMenu(e: MouseEvent, server: ApiServer) {
     e.preventDefault();
     e.stopPropagation();
+    setConfirmLeave(false);
     setContextMenu({
       visible: true,
       x: e.clientX,
@@ -181,32 +195,39 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
         const isActive = view === 'server' && server.server_url === activeServerUrl;
         const iconUrl = icons[server.server_url];
         const isOffline = offlineServers.has(server.server_url);
+        const notif = serverNotifMap[server.server_url];
+        const hasMention = !!notif?.hasMention;
+        const hasUnread  = !isActive && !hasMention && !!notif?.hasUnread;
         return (
-          <button
+          <div
             key={server.server_url}
-            className={`${styles.node} ${isActive ? styles.active : ''} ${iconUrl ? railStyles.nodeWithIcon : ''}`}
-            title={isOffline ? `${server.server_name} (offline)` : server.server_name}
-            onClick={() => onSelectServer(server.server_url, server.server_name)}
-            onContextMenu={(e) => handleContextMenu(e, server)}
-            aria-label={`Select ${server.server_name} server`}
+            className={`${railStyles.serverWrap} ${hasMention ? railStyles.mentioned : hasUnread ? railStyles.unread : ''}`}
           >
-            {iconUrl ? (
-              <img
-                src={iconUrl}
-                alt={server.server_name}
-                className={railStyles.serverIcon}
-                onError={() => {
-                  _iconCache.set(server.server_url, null);
-                  setIcons(prev => ({ ...prev, [server.server_url]: null }));
-                }}
-              />
-            ) : (
-              <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                {serverInitials(server.server_name)}
-              </span>
-            )}
-            {isOffline && <span className={railStyles.offlineDot} aria-label="offline" />}
-          </button>
+            <button
+              className={`${styles.node} ${isActive ? styles.active : ''} ${iconUrl ? railStyles.nodeWithIcon : ''}`}
+              title={isOffline ? `${server.server_name} (offline)` : server.server_name}
+              onClick={() => onSelectServer(server.server_url, server.server_name)}
+              onContextMenu={(e) => handleContextMenu(e, server)}
+              aria-label={`Select ${server.server_name} server`}
+            >
+              {iconUrl ? (
+                <img
+                  src={iconUrl}
+                  alt={server.server_name}
+                  className={railStyles.serverIcon}
+                  onError={() => {
+                    _iconCache.set(server.server_url, null);
+                    setIcons(prev => ({ ...prev, [server.server_url]: null }));
+                  }}
+                />
+              ) : (
+                <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                  {serverInitials(server.server_name)}
+                </span>
+              )}
+              {isOffline && <span className={railStyles.offlineDot} aria-label="offline" />}
+            </button>
+          </div>
         );
       })}
 
@@ -245,13 +266,33 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
           role="menu"
           aria-label="Server actions"
         >
-          <button
-            className={styles.contextMenuItem}
-            onClick={handleLeaveServer}
-            role="menuitem"
-          >
-            Leave Server
-          </button>
+          {confirmLeave ? (
+            <>
+              <div className={styles.contextMenuLabel}>Leave {contextMenu.serverName}?</div>
+              <button
+                className={styles.contextMenuItem}
+                onClick={() => setConfirmLeave(false)}
+                role="menuitem"
+              >
+                Cancel
+              </button>
+              <button
+                className={`${styles.contextMenuItem} ${styles.contextMenuItemDanger}`}
+                onClick={handleLeaveServer}
+                role="menuitem"
+              >
+                Leave Server
+              </button>
+            </>
+          ) : (
+            <button
+              className={styles.contextMenuItem}
+              onClick={() => setConfirmLeave(true)}
+              role="menuitem"
+            >
+              Leave Server
+            </button>
+          )}
         </div>
       )}
     </nav>

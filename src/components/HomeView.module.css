@@ -459,6 +459,15 @@
   color: var(--red);
 }
 
+.confirmInline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 .actionBtnAccept {
   width: auto;
   padding: 0 12px;

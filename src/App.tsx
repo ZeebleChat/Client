@@ -7,6 +7,8 @@ import {
   fetchMembers,
   fetchCustomRoles,
   fetchServerInfo,
+  fetchUnreadState,
+  markChannelRead,
   exchangeToken,
   getAccountInfo,
   leaveCloudServer,
@@ -25,6 +27,7 @@ import { forceLogout } from './auth';
 import { getBeamIdentity } from './auth';
 import type { SidebarCategory } from './types';
 import { useWebSocket, buildChatMessagePayload } from './hooks/useWebSocket';
+import { addNotification, clearPingsForChannel } from './notificationStore';
 import { useTheme } from './hooks/useTheme';
 import { useResourcePack } from './hooks/useResourcePack';
 
@@ -113,6 +116,16 @@ export default function App() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [apiCategories, setApiCategories] = useState<import('./api').ApiCategory[]>([]);
   const [activeChannel, setActiveChannel] = useState<ApiChannel | null>(null);
+  const [unreadChannelIds, setUnreadChannelIds] = useState<Set<string>>(new Set());
+  const [mentionCounts, setMentionCounts] = useState<Record<string, number>>({});
+  // Persists per-server unread/mention state across server switches AND page
+  // refreshes so the rail can show indicators on servers you're not viewing.
+  const [serverNotifMap, setServerNotifMap] = useState<Record<string, { hasUnread: boolean; hasMention: boolean }>>(() => {
+    try {
+      const raw = localStorage.getItem('zbl_server_notif_map');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
 
   const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -145,29 +158,57 @@ export default function App() {
   useEffect(() => { channelsRef.current = channels; }, [channels]);
   const activeChannelRef = useRef(activeChannel);
   useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
+  const activeServerUrlRef = useRef(activeServerUrl);
+  useEffect(() => { activeServerUrlRef.current = activeServerUrl; }, [activeServerUrl]);
+  const mentionCountsRef = useRef(mentionCounts);
+  useEffect(() => { mentionCountsRef.current = mentionCounts; }, [mentionCounts]);
+  const unreadChannelIdsRef = useRef(unreadChannelIds);
+  useEffect(() => { unreadChannelIdsRef.current = unreadChannelIds; }, [unreadChannelIds]);
+  // Blocks the serverNotifMap sync effect during server switches so the old
+  // server's badge isn't wiped when mentionCounts is cleared mid-transition.
+  const serverSwitchingRef = useRef(false);
+
+  // Keep the per-server notification map in sync so the rail shows indicators
+  // even after switching away from a server that still has unreads/mentions.
+  useEffect(() => {
+    if (!activeServerUrl || serverSwitchingRef.current) return;
+    setServerNotifMap(prev => ({
+      ...prev,
+      [activeServerUrl]: {
+        hasUnread: unreadChannelIds.size > 0,
+        hasMention: Object.values(mentionCounts).some(c => c > 0),
+      },
+    }));
+  }, [activeServerUrl, unreadChannelIds, mentionCounts]);
+
+  useEffect(() => {
+    try { localStorage.setItem('zbl_server_notif_map', JSON.stringify(serverNotifMap)); } catch {}
+  }, [serverNotifMap]);
 
   const handleWsEvent = useCallback((event: import('./hooks/useWebSocket').WsEvent) => {
     if (event.type === 'message') {
-      setMessages(prev => {
-        const alreadyExists = prev.some(
-          m => !String(m.id).startsWith('opt-') && String(m.id) === String(event.msg.id)
-        );
-        if (alreadyExists) return prev;
-
-        const myId = getBeamIdentity();
-        if (event.msg.beam_identity === myId) {
-          const optIdx = prev.findIndex(
-            m => (m as ApiMessage & { _optimistic?: boolean })._optimistic &&
-                 m.content === event.msg.content
+      if (String(event.msg.channel_id) === String(activeChannelRef.current?.id)) {
+        setMessages(prev => {
+          const alreadyExists = prev.some(
+            m => !String(m.id).startsWith('opt-') && String(m.id) === String(event.msg.id)
           );
-          if (optIdx !== -1) {
-            const next = [...prev];
-            next[optIdx] = event.msg;
-            return next;
+          if (alreadyExists) return prev;
+
+          const myId = getBeamIdentity();
+          if (event.msg.beam_identity === myId) {
+            const optIdx = prev.findIndex(
+              m => (m as ApiMessage & { _optimistic?: boolean })._optimistic &&
+                   m.content === event.msg.content
+            );
+            if (optIdx !== -1) {
+              const next = [...prev];
+              next[optIdx] = event.msg;
+              return next;
+            }
           }
-        }
-        return [...prev, event.msg];
-      });
+          return [...prev, event.msg];
+        });
+      }
       const ch = channelsRef.current.find(c => String(c.id) === String(event.msg.channel_id));
       notifyMessage(
         ch?.name ?? 'channel',
@@ -176,18 +217,43 @@ export default function App() {
         activeChannelRef.current?.id ?? null,
         event.msg.channel_id
       );
+      const myId = getBeamIdentity();
+      const isMentioned = !!(myId && event.msg.beam_identity !== myId && event.msg.mentions?.includes(myId));
+      const isActiveChannel = String(event.msg.channel_id) === String(activeChannelRef.current?.id);
+      if (isMentioned) {
+        addNotification({
+          type: 'ping',
+          title: `#${ch?.name ?? 'channel'}`,
+          body: event.msg.content.slice(0, 120),
+        });
+      }
+      if (!isActiveChannel) {
+        setUnreadChannelIds(prev => {
+          const next = new Set(prev);
+          next.add(String(event.msg.channel_id));
+          return next;
+        });
+        if (isMentioned) {
+          const chId = String(event.msg.channel_id);
+          setMentionCounts(prev => ({ ...prev, [chId]: (prev[chId] ?? 0) + 1 }));
+        }
+      }
     }
     if (event.type === 'message_edited') {
-      setMessages(prev =>
-        prev.map(m =>
-          String(m.id) === String(event.id)
-            ? { ...m, content: event.content, edited_at: event.edited_at ?? null }
-            : m
-        )
-      );
+      if (String(event.channel_id) === String(activeChannelRef.current?.id)) {
+        setMessages(prev =>
+          prev.map(m =>
+            String(m.id) === String(event.id)
+              ? { ...m, content: event.content, edited_at: event.edited_at ?? null }
+              : m
+          )
+        );
+      }
     }
     if (event.type === 'message_deleted') {
-      setMessages(prev => prev.filter(m => String(m.id) !== String(event.id)));
+      if (String(event.channel_id) === String(activeChannelRef.current?.id)) {
+        setMessages(prev => prev.filter(m => String(m.id) !== String(event.id)));
+      }
     }
     if (event.type === 'member') {
       setMemberGroups(event.groups);
@@ -282,6 +348,19 @@ export default function App() {
 
   const selectChannel = useCallback(async (channel: ApiChannel) => {
     setActiveChannel(channel);
+    setUnreadChannelIds(prev => {
+      const next = new Set(prev);
+      next.delete(String(channel.id));
+      return next;
+    });
+    setMentionCounts(prev => {
+      if (!prev[String(channel.id)]) return prev;
+      clearPingsForChannel(`#${channel.name}`);
+      const next = { ...prev };
+      delete next[String(channel.id)];
+      return next;
+    });
+    markChannelRead(channel.id);
     setMessages([]);
     setMessagesLoading(true);
     setMobileSidebarOpen(false);
@@ -291,6 +370,18 @@ export default function App() {
   }, []);
 
   const switchServer = useCallback(async (serverUrl: string, serverName: string) => {
+    // Snapshot the leaving server's state before we clear anything, then block
+    // the sync effect so it can't clobber the snapshot mid-transition.
+    const prevUrl = activeServerUrlRef.current;
+    if (prevUrl) {
+      const snap = {
+        hasUnread: unreadChannelIdsRef.current.size > 0,
+        hasMention: Object.values(mentionCountsRef.current).some(c => c > 0),
+      };
+      setServerNotifMap(prev => ({ ...prev, [prevUrl]: snap }));
+    }
+    serverSwitchingRef.current = true;
+
     setChannels([]);
     setApiCategories([]);
     setActiveChannel(null);
@@ -299,6 +390,9 @@ export default function App() {
     setServerOwnerBeamIdentity(null);
     setServerBannerAttachmentId(null);
     setWsVoiceRoomMap({});
+    setUnreadChannelIds(new Set());
+    setMentionCounts({});
+    setServerNotifMap(prev => { const n = { ...prev }; delete n[serverUrl]; return n; });
 
     await exchangeToken(serverUrl);
 
@@ -320,7 +414,16 @@ export default function App() {
       setServerOwnerBeamIdentity(info?.owner_beam_identity ?? null);
     });
 
+    // Mark first channel as read before fetching unread state so the server
+    // response already excludes it — no local-clear race condition.
     const first = chs.find(ch => ch.type === 'text');
+    if (first) await markChannelRead(first.id);
+
+    const unreadState = await fetchUnreadState();
+    setUnreadChannelIds(new Set(unreadState.unread));
+    serverSwitchingRef.current = false;
+    setMentionCounts(unreadState.mentions);
+
     if (first) selectChannel(first);
     setView('server');
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,7 +446,17 @@ export default function App() {
         setServerBannerAttachmentId(info?.banner_attachment_id ?? null);
         setServerOwnerBeamIdentity(info?.owner_beam_identity ?? null);
       });
+
+      // Mark the first channel as read on the server before fetching unread state
+      // so the response already excludes it — avoids a React batch race where
+      // setMentionCounts(server data) and selectChannel's clear run together.
       const first = chs.find(ch => ch.type === 'text');
+      if (first) await markChannelRead(first.id);
+
+      const unreadState = await fetchUnreadState();
+      setUnreadChannelIds(new Set(unreadState.unread));
+      setMentionCounts(unreadState.mentions);
+
       if (first) selectChannel(first);
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -486,6 +599,7 @@ export default function App() {
         <RailAdapter
           servers={servers}
           activeServerUrl={activeServerUrl}
+          serverNotifMap={serverNotifMap}
           view={view}
           onSelectServer={(url, name) => { setView('server'); switchServer(url, name); }}
           onLogout={() => { forceLogout(); setAuthed(false); }}
@@ -528,6 +642,8 @@ export default function App() {
             <Sidebar
               mobileOpen={mobileSidebarOpen}
               serverName={activeServerName}
+              unreadChannelIds={unreadChannelIds}
+              mentionCounts={mentionCounts}
               bannerAttachmentId={serverBannerAttachmentId}
               categories={sidebarCategories}
               activeChannelId={activeChannel?.id ?? null}

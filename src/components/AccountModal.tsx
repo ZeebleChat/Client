@@ -2,7 +2,7 @@
  * Account settings modal with multiple tabs:
  * Profile (avatar, display name), Security (password), Friends,
  * Servers (leave), Sub-accounts (create/manage), Premium info,
- * Appearance (theme, accent color), and Dev (server URLs).
+ * Appearance (theme, accent color), and App Settings (server URLs, close behaviour).
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -56,6 +56,9 @@ import { setAvatarCache, getAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCac
 import { useTheme, type Theme } from '../hooks/useTheme';
 import PermissionGate from './PermissionGate';
 import styles from './AccountModal.module.css';
+import { invoke } from '@tauri-apps/api/core';
+
+const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI__' in window;
 
 interface Props {
   onClose: () => void;
@@ -927,6 +930,7 @@ function FriendsTab({ onDm }: { onDm?: (beam: string) => void }) {
   const [addLoading, setAddLoading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [accepting, setAccepting] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [fr, rq] = await Promise.all([fetchFriends(), fetchFriendRequests()]);
@@ -1058,20 +1062,28 @@ function FriendsTab({ onDm }: { onDm?: (beam: string) => void }) {
                 </svg>
               </button>
             )}
-            <button
-              className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-              title="Remove friend"
-              disabled={removing === f.beam_identity}
-              onClick={() => handleRemove(f.id, f.beam_identity)}
-            >
-              {removing === f.beam_identity ? '…' : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                  <circle cx="9" cy="7" r="4"/>
-                  <line x1="22" y1="18" x2="16" y2="18"/>
-                </svg>
-              )}
-            </button>
+            {confirmRemove === f.beam_identity ? (
+              <div className={styles.confirmInline}>
+                <span>Unfriend?</span>
+                <button className={`${styles.actionBtn} ${styles.actionBtnAccept}`} style={{ color: 'var(--text-2)' }} onClick={() => setConfirmRemove(null)}>Cancel</button>
+                <button className={styles.actionBtn} style={{ color: 'var(--red)' }} disabled={removing === f.beam_identity} onClick={() => { handleRemove(f.id, f.beam_identity); setConfirmRemove(null); }}>Yes</button>
+              </div>
+            ) : (
+              <button
+                className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
+                title="Remove friend"
+                disabled={removing === f.beam_identity}
+                onClick={() => setConfirmRemove(f.beam_identity)}
+              >
+                {removing === f.beam_identity ? '…' : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <line x1="22" y1="18" x2="16" y2="18"/>
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
         );
       })}
@@ -1085,6 +1097,7 @@ function ServersTab({ onSwitchServer }: { onSwitchServer?: (url: string, name: s
   const [servers, setServers] = useState<ApiServer[]>([]);
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeStatus, setRemoveStatus] = useState<{ url: string; ok: boolean; msg: string } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetchServers().then(setServers);
@@ -1154,20 +1167,28 @@ function ServersTab({ onSwitchServer }: { onSwitchServer?: (url: string, name: s
                 </svg>
               </button>
             )}
-            <button
-              className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-              title="Leave server"
-              disabled={removing === srv.server_url}
-              onClick={() => handleRemove(srv.server_url)}
-            >
-              {removing === srv.server_url ? '…' : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-              )}
-            </button>
+            {confirmRemove === srv.server_url ? (
+              <div className={styles.confirmInline}>
+                <span>Leave server?</span>
+                <button className={`${styles.actionBtn} ${styles.actionBtnAccept}`} style={{ color: 'var(--text-2)' }} onClick={() => setConfirmRemove(null)}>Cancel</button>
+                <button className={styles.actionBtn} style={{ color: 'var(--red)' }} disabled={removing === srv.server_url} onClick={() => { handleRemove(srv.server_url); setConfirmRemove(null); }}>Yes</button>
+              </div>
+            ) : (
+              <button
+                className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
+                title="Leave server"
+                disabled={removing === srv.server_url}
+                onClick={() => setConfirmRemove(srv.server_url)}
+              >
+                {removing === srv.server_url ? '…' : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
         </div>
       ))}
@@ -1839,9 +1860,9 @@ function applyAccessibility(reduceMotion: boolean, highContrast: boolean, largeT
   applyAccessibility(rm, hc, lt);
 })();
 
-// ── Dev tab ────────────────────────────────────────────────────────────────────
+// ── App Settings tab ───────────────────────────────────────────────────────────
 
-function DevTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
+function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
   const [authUrl, setAuthUrl] = useState(
     localStorage.getItem('auth_server_url') || ENV_AUTH_URL
   );
@@ -1852,6 +1873,22 @@ function DevTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
     localStorage.getItem('zcloud_url') || ENV_ZCLOUD_URL
   );
   const [saved, setSaved] = useState(false);
+  const [closeToTray, setCloseToTray] = usePref('close_to_tray', false);
+
+  // Sync saved pref into Tauri on mount so the setting survives restarts.
+  useEffect(() => {
+    if (isTauri()) {
+      invoke('set_close_to_tray', { enabled: closeToTray }).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleCloseToTrayChange(v: boolean) {
+    setCloseToTray(v);
+    if (isTauri()) {
+      invoke('set_close_to_tray', { enabled: v }).catch(() => {});
+    }
+  }
 
   function handleSave() {
     localStorage.setItem('auth_server_url', authUrl);
@@ -1905,7 +1942,18 @@ function DevTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
         {saved ? 'Saved!' : 'Save'}
       </button>
 
-      <div className={styles.sectionTitle} style={{ marginTop: 8 }}>Auth Token</div>
+      <div className={styles.sectionTitle} style={{ marginTop: 20 }}>Window Behaviour</div>
+      {isTauri() ? (
+        <SettingRow label="Close to tray" sub="Clicking × hides the window instead of quitting">
+          <NeuToggle value={closeToTray} onChange={handleCloseToTrayChange} />
+        </SettingRow>
+      ) : (
+        <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+          Window options are only available in the desktop app.
+        </p>
+      )}
+
+      <div className={styles.sectionTitle} style={{ marginTop: 20 }}>Auth Token</div>
       <div className={styles.devTokenWrap}>
         <div className={styles.inputReadonly} style={{ fontSize: 10, wordBreak: 'break-all', userSelect: 'all' }}>
           {token || '(no token)'}
@@ -2372,11 +2420,11 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode; gold?: boolean }[] 
   },
   {
     id: 'dev',
-    label: 'Dev',
+    label: 'App Settings',
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="16 18 22 12 16 6"/>
-        <polyline points="8 6 2 12 8 18"/>
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     ),
   },
@@ -2459,7 +2507,7 @@ export default function AccountModal({ onClose, onLogout, onDm, onSwitchServer, 
             {activeTab === 'appearance'  && <AppearanceTab />}
             {activeTab === 'notifications' && <NotificationsTab />}
             {activeTab === 'voice'         && <VoiceTab />}
-            {activeTab === 'dev'            && <DevTab onOpenDevPanel={onOpenDevPanel} />}
+            {activeTab === 'dev'            && <AppSettingsTab onOpenDevPanel={onOpenDevPanel} />}
             {activeTab === 'connections'    && <ConnectionsTab />}
           </div>
         </div>

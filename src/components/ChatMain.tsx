@@ -7,7 +7,8 @@ import UserPopup, { type UserPopupInfo, type UserPopupPos } from './UserPopup';
 import VideoPlayer from './VideoPlayer';
 import Lightbox from './Lightbox';
 import type { ApiMessage, ApiEditHistoryEntry } from '../api';
-import { getRoleColor, uploadFile, getAttachmentUrl, editMessage, deleteMessage, fetchMessageHistory } from '../api';
+import { getRoleColor, uploadFile, fetchAttachment, editMessage, deleteMessage, fetchMessageHistory } from '../api';
+import { useAttachmentBlobUrl } from '../hooks/useAttachmentBlobUrl';
 import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
 import { formatTime } from '../types';
@@ -120,20 +121,22 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
 }
 
 function AttachmentView({ att }: { att: NonNullable<ApiMessage['attachments']>[number] }) {
-  const url = getAttachmentUrl(att.id);
+  const blobUrl = useAttachmentBlobUrl(att.id, fetchAttachment);
   const ct = att.content_type ?? '';
   const fname = att.filename ?? '';
-  const isImage = ct.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fname);
+  const isImage = ct.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fname);
   const isVideo = ct.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi)$/i.test(fname);
   const isAudio = ct.startsWith('audio/') || /\.(mp3|ogg|wav|flac|m4a)$/i.test(fname);
 
-  if (isImage) return <InlineImage src={url} alt={fname || 'attachment'} />;
-  if (isVideo) return <VideoPlayer src={url} className={styles.attachVideo} />;
-  if (isAudio) return <audio src={url} controls className={styles.attachAudio} preload="metadata" />;
+  if (!blobUrl) return null;
+
+  if (isImage) return <InlineImage src={blobUrl} alt={fname || 'attachment'} />;
+  if (isVideo) return <VideoPlayer src={blobUrl} className={styles.attachVideo} />;
+  if (isAudio) return <audio src={blobUrl} controls className={styles.attachAudio} preload="metadata" />;
 
   const kb = att.size ? ` · ${(att.size / 1024).toFixed(1)} KB` : '';
   return (
-    <a href={url} target="_blank" rel="noreferrer" className={styles.attachFile}>
+    <a href={blobUrl} download={fname || 'file'} className={styles.attachFile}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
         <polyline points="14 2 14 8 20 8"/>

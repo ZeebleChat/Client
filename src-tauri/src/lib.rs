@@ -2,6 +2,18 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State, Emitter};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
+
+// ── Close-to-tray state ───────────────────────────────────────────────────────
+
+struct CloseToTrayState {
+    enabled: AtomicBool,
+}
+
+#[tauri::command]
+fn set_close_to_tray(enabled: bool, state: State<CloseToTrayState>) {
+    state.enabled.store(enabled, Ordering::Relaxed);
+}
 
 // ── Packs URI scheme helpers ──────────────────────────────────────────────────
 
@@ -388,6 +400,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .manage(Mutex::<Option<CaptureHandle>>::new(None))
+        .manage(CloseToTrayState { enabled: AtomicBool::new(false) })
         // Serve <appDataDir>/packs/<name>/... as packs://localhost/<name>/...
         .register_uri_scheme_protocol("packs", |ctx, request| {
             let Some(dir) = packs_dir(ctx.app_handle()) else {
@@ -419,6 +432,7 @@ pub fn run() {
             save_credential,
             load_credential,
             delete_credential,
+            set_close_to_tray,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -426,6 +440,23 @@ pub fn run() {
                 check_for_updates(handle).await;
             });
 
+            // ── System tray ───────────────────────────────────────────────────
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Zeeble")
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click on the tray icon → restore / focus the window.
+                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ── Main window ───────────────────────────────────────────────────
             #[allow(unused_mut)]
             let mut builder = tauri::WebviewWindowBuilder::new(
                 app,
@@ -450,7 +481,23 @@ pub fn run() {
                 );
             }
 
-            builder.build()?;
+            let window = builder.build()?;
+
+            // ── Close-to-tray: intercept the × button ─────────────────────────
+            // If the user has enabled "close to tray" we prevent the default
+            // close and hide the window instead; the tray icon brings it back.
+            let app_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let state: tauri::State<CloseToTrayState> = app_handle.state();
+                    if state.enabled.load(Ordering::Relaxed) {
+                        api.prevent_close();
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })

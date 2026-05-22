@@ -2,6 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Content Security Policy
+         connect-src includes http:/ws: so self-hosted servers without TLS work.
+         style-src allows 'unsafe-inline' because React uses inline style props.
+         frame-ancestors cannot be set via meta tag; add it as an HTTP header on
+         the production server (e.g. Content-Security-Policy: frame-ancestors 'none').
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' https://js.stripe.com;
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+      img-src 'self' blob: data: https:;
+      media-src 'self' blob:;
+      connect-src 'self' https: wss: http: ws:;
+      font-src 'self' data: https://fonts.gstatic.com;
+      object-src 'none';
+      frame-src https://js.stripe.com;
+      worker-src 'self' blob:;
+      base-uri 'self';
+      form-action 'self'
+    " />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Zeeble</title>

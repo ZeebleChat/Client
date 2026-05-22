@@ -1,3 +1,37 @@
+/* Wrapper for each server node — holds the pill indicator outside overflow:hidden */
+.serverWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.serverWrap::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  opacity: 0;
+  transition: opacity 0.2s, height 0.2s;
+  pointer-events: none;
+}
+
+.serverWrap.unread::before {
+  opacity: 1;
+  height: 8px;
+  background: var(--accent);
+}
+
+.serverWrap.mentioned::before {
+  opacity: 1;
+  height: 16px;
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
 .offlineDot {
   position: absolute;
   bottom: 3px;

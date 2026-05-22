@@ -288,6 +288,34 @@
   border-color: rgba(255, 255, 255, 0.01);
 }
 
+.chItem.unread {
+  color: var(--text-1);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chItem.mentioned {
+  color: var(--text-1);
+  background: rgba(239, 68, 68, 0.08);
+  box-shadow: inset 3px 0 0 #ef4444;
+}
+
+.chItem.mentioned .chIcon {
+  opacity: 1;
+}
+
+.mentionBadge {
+  flex-shrink: 0;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1.6;
+}
+
 .chIcon {
   opacity: 0.6;
   width: 16px;

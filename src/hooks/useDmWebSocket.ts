@@ -24,9 +24,16 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
     // Guard against StrictMode double-invoke
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
 
-    const wsUrl = rawUrl.replace(/^http/, 'ws');
+    // Guard: don't open a doomed connection before tryAutoLogin sets the token.
+    // Poll every 500 ms until the token lands, then connect immediately.
     const token = getToken();
-    const url = `${wsUrl}/ws?token=${encodeURIComponent(token ?? '')}`;
+    if (!token) {
+      reconnectTimer.current = setTimeout(connect, 500);
+      return;
+    }
+
+    const wsUrl = rawUrl.replace(/^http/, 'ws');
+    const url = `${wsUrl}/ws?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(url);
     wsRef.current = socket;
 
@@ -52,7 +59,22 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
   useEffect(() => {
     if (!enabled) return;
     connect();
+
+    // When the window regains focus, throttled reconnect timers resume.
+    // Force an immediate reconnect instead of waiting for the backoff.
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const current = wsRef.current;
+      if (!current || current.readyState === WebSocket.CLOSED) {
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        reconnectDelay.current = RECONNECT_BASE_MS;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisible);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisible);
       enabledRef.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();

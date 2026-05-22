@@ -291,14 +291,20 @@ export interface ServerInfo {
   banner_attachment_id?: string | null;
 }
 
-export function getServerAttachmentUrl(serverUrl: string, attachmentId: string): string {
+export function fetchServerAttachment(serverUrl: string, attachmentId: string | number): Promise<Response> {
   const token = getChatToken(serverUrl) ?? getToken();
-  return `${serverUrl}/v1/attachments/${encodeURIComponent(attachmentId)}?token=${encodeURIComponent(token ?? '')}`;
+  return fetch(`${serverUrl}/v1/attachments/${encodeURIComponent(String(attachmentId))}`, {
+    headers: { Authorization: `Bearer ${token ?? ''}` },
+  });
 }
 
 export async function fetchServerInfo(serverUrl: string): Promise<ServerInfo | null> {
   try {
-    const res = await fetch(`${serverUrl}/v1/server/info`, { signal: AbortSignal.timeout(5000) });
+    const token = getChatToken(serverUrl) ?? getToken();
+    const res = await fetch(`${serverUrl}/v1/server/info`, {
+      signal: AbortSignal.timeout(5000),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (!res.ok) return null;
     return res.json();
   } catch { return null; }
@@ -322,6 +328,30 @@ export async function fetchChannels(): Promise<ApiChannel[]> {
     return unwrapArray<ApiChannel>(await res.json(), 'channels');
   } catch { return []; }
 }
+
+export interface UnreadState {
+  unread: string[];
+  mentions: Record<string, number>;
+}
+
+export async function fetchUnreadState(): Promise<UnreadState> {
+  try {
+    const res = await authedFetch(`${getServerUrl()}/v1/channels/unread`);
+    if (!res.ok) return { unread: [], mentions: {} };
+    const data = await res.json();
+    return {
+      unread: Array.isArray(data.channel_ids) ? data.channel_ids : [],
+      mentions: (data.mentions && typeof data.mentions === 'object') ? data.mentions : {},
+    };
+  } catch { return { unread: [], mentions: {} }; }
+}
+
+export async function markChannelRead(channelId: string | number): Promise<void> {
+  try {
+    await authedFetch(`${getServerUrl()}/v1/channels/${encodeURIComponent(String(channelId))}/read`, { method: 'POST' });
+  } catch { /* fire and forget */ }
+}
+
 
 // ── Categories ────────────────────────────────────────────────────────────────
 
@@ -359,6 +389,7 @@ export interface ApiMessage {
   created_at: number | string;
   attachments?: ApiAttachment[];
   edited_at?: string | null;
+  mentions?: string[];
 }
 
 export interface MessagePage {
@@ -733,10 +764,8 @@ export async function deleteCategory(id: string | number): Promise<{ ok: boolean
 
 // ── File upload ───────────────────────────────────────────────────────────────
 
-export function getAttachmentUrl(attachmentId: string | number): string {
-  const base = getServerUrl();
-  const token = getChatToken(base) ?? getToken();
-  return `${base}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+export function fetchAttachment(attachmentId: string | number): Promise<Response> {
+  return authedFetch(`${getServerUrl()}/v1/attachments/${encodeURIComponent(String(attachmentId))}`);
 }
 
 export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string | number; error?: string }> {
@@ -756,10 +785,11 @@ export async function uploadFile(file: File): Promise<{ ok: boolean; id?: string
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
-export function getDmAttachmentUrl(attachmentId: string | number): string {
-  const base = getDmUrl();
+export function fetchDmAttachment(attachmentId: string | number): Promise<Response> {
   const token = getToken();
-  return `${base}/v1/attachments/${encodeURIComponent(String(attachmentId))}?token=${encodeURIComponent(token ?? '')}`;
+  return fetch(`${getDmUrl()}/v1/attachments/${encodeURIComponent(String(attachmentId))}`, {
+    headers: { Authorization: `Bearer ${token ?? ''}` },
+  });
 }
 
 export async function uploadDmFile(file: File): Promise<{ ok: boolean; id?: string | number; error?: string }> {
@@ -1666,7 +1696,11 @@ export async function validateToken(): Promise<'valid' | 'invalid' | 'network_er
 export async function checkServerHealth(serverUrl: string): Promise<boolean> {
   if (!serverUrl) return true;
   try {
-    const res = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(5000) });
+    const token = getChatToken(serverUrl) ?? getToken();
+    const res = await fetch(`${serverUrl}/health`, {
+      signal: AbortSignal.timeout(5000),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     return res.ok;
   } catch { return false; }
 }

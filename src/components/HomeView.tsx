@@ -14,21 +14,35 @@ import {
   fetchDMs,
   sendDM,
   uploadDmFile,
-  getDmAttachmentUrl,
+  fetchDmAttachment,
   type ApiFriend,
   type ApiFriendRequest,
   type ApiDmMessage,
   type ApiAttachment,
 } from '../api';
-import { getBeamIdentity, getToken } from '../auth';
+import { getBeamIdentity } from '../auth';
 import { useNotifications } from '../hooks/useNotifications';
-import { getDmUrl } from '../config';
+import { useAttachmentBlobUrl } from '../hooks/useAttachmentBlobUrl';
+import { useDmWebSocket } from '../hooks/useDmWebSocket';
 import { setAvatarCache } from '../avatarCache';
 import UserAvatar from './UserAvatar';
 import EmojiPicker, { type EmojiClickData, Theme } from 'emoji-picker-react';
 import GiphyPicker from './GiphyPicker';
 import { searchEmojis, type EmojiEntry } from './emojiData';
 import styles from './HomeView.module.css';
+
+const NOTIFIED_FR_KEY = 'zbl_notified_fr_ids';
+function getNotifiedFrIds(): Set<string | number> {
+  try {
+    const raw = localStorage.getItem(NOTIFIED_FR_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch { return new Set(); }
+}
+function markFrNotified(id: string | number) {
+  const ids = getNotifiedFrIds();
+  ids.add(String(id));
+  localStorage.setItem(NOTIFIED_FR_KEY, JSON.stringify([...ids]));
+}
 
 interface Props {
   onOpenAccount: () => void;
@@ -106,29 +120,31 @@ function isGifUrl(content: string): boolean {
 }
 
 function DmAttachmentView({ att }: { att: ApiAttachment }) {
-  const url = getDmAttachmentUrl(att.id);
+  const blobUrl = useAttachmentBlobUrl(att.id, fetchDmAttachment);
   const ct = att.content_type ?? '';
   const fname = att.filename ?? '';
-  const isImage = ct.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fname);
+  const isImage = ct.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fname);
   const isVideo = ct.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi)$/i.test(fname);
   const isAudio = ct.startsWith('audio/') || /\.(mp3|ogg|wav|flac|m4a)$/i.test(fname);
 
+  if (!blobUrl) return null;
+
   if (isImage) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className={styles.dmAttachImgLink}>
-        <img src={url} alt={fname || 'image'} className={styles.dmAttachImg} />
+      <a href={blobUrl} download={fname || 'image'} className={styles.dmAttachImgLink}>
+        <img src={blobUrl} alt={fname || 'image'} className={styles.dmAttachImg} />
       </a>
     );
   }
   if (isVideo) {
-    return <video src={url} controls className={styles.dmAttachVideo} />;
+    return <video src={blobUrl} controls className={styles.dmAttachVideo} />;
   }
   if (isAudio) {
-    return <audio src={url} controls className={styles.dmAttachAudio} preload="metadata" />;
+    return <audio src={blobUrl} controls className={styles.dmAttachAudio} preload="metadata" />;
   }
   const kb = att.size ? ` · ${(att.size / 1024).toFixed(1)} KB` : '';
   return (
-    <a href={url} target="_blank" rel="noreferrer" className={styles.dmAttachFile}>
+    <a href={blobUrl} download={fname || 'file'} className={styles.dmAttachFile}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
         <polyline points="14 2 14 8 20 8"/>
@@ -207,8 +223,10 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
         const data = JSON.parse(e.data);
         const sender = data.from ?? data.sender_beam ?? '';
         const recipient = data.to ?? data.recipient_beam ?? '';
+        // DirectMessage has no "type" field — detect by presence of sender + recipient.
+        // Exclude system/pong/sent control frames which have no beam identity fields.
         if (
-          data.type === 'dm' &&
+          sender && recipient &&
           (sender === beamIdentity || recipient === beamIdentity)
         ) {
           const rawAtts = data.attachments ?? data.files ?? [];
@@ -539,6 +557,7 @@ function FriendsPanel({ friends, requests, onMessage, onAddFriend, onRefresh }: 
   const [tab, setTab] = useState<FriendsTab>('online');
   const [removing, setRemoving] = useState<string | null>(null);
   const [accepting, setAccepting] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const online = friends.filter(f => f.status === 'online');
   const pending = requests.filter(r => r.direction === 'incoming' || !r.direction);
@@ -628,18 +647,26 @@ function FriendsPanel({ friends, requests, onMessage, onAddFriend, onRefresh }: 
                   </svg>
                 </button>
                 {tab === 'all' && (
-                  <button
-                    className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-                    title="Remove friend"
-                    disabled={removing === f.beam_identity}
-                    onClick={() => handleRemove(f.id, f.beam_identity)}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                      <circle cx="9" cy="7" r="4"/>
-                      <line x1="22" y1="18" x2="16" y2="18"/>
-                    </svg>
-                  </button>
+                  confirmRemove === f.beam_identity ? (
+                    <div className={styles.confirmInline}>
+                      <span>Unfriend?</span>
+                      <button className={`${styles.actionBtn} ${styles.actionBtnAccept}`} style={{ color: 'var(--text-2)' }} onClick={() => setConfirmRemove(null)}>Cancel</button>
+                      <button className={styles.actionBtn} style={{ color: 'var(--red)' }} disabled={removing === f.beam_identity} onClick={() => { handleRemove(f.id, f.beam_identity); setConfirmRemove(null); }}>Yes</button>
+                    </div>
+                  ) : (
+                    <button
+                      className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
+                      title="Remove friend"
+                      disabled={removing === f.beam_identity}
+                      onClick={() => setConfirmRemove(f.beam_identity)}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <line x1="22" y1="18" x2="16" y2="18"/>
+                      </svg>
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -1007,9 +1034,11 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [requests, setRequests] = useState<ApiFriendRequest[]>([]);
   const [conversations, setConversations] = useState<DmConversation[]>([]);
-  const [dmWs, setDmWs] = useState<WebSocket | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const { notifyDm } = useNotifications();
+  // useDmWebSocket: auto-reconnects, passes token as ?token= (required by zpulse),
+  // and waits for the auth token before opening the first connection.
+  const dmWs = useDmWebSocket(true);
+  const { notifyDm, notifyFriendRequest } = useNotifications();
+  const knownRequestIdsRef = useRef<Set<string | number> | null>(null);
 
   // Build DM conversation list from friends list
   useEffect(() => {
@@ -1026,78 +1055,79 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
     fr.forEach(f => {
       if (f.avatar_attachment_id != null) setAvatarCache(f.beam_identity, String(f.avatar_attachment_id));
     });
+    const incoming = rq.filter(r => r.direction === 'incoming' || !r.direction);
+    const notifiedIds = getNotifiedFrIds();
+
+    if (knownRequestIdsRef.current === null) {
+      // First load — notify for any request not previously notified, then seed
+      knownRequestIdsRef.current = new Set(rq.map(r => r.id));
+      incoming.forEach(req => {
+        if (!notifiedIds.has(String(req.id))) {
+          const name = req.display_name || req.from_beam || req.beam_identity || 'Someone';
+          notifyFriendRequest(name);
+          markFrNotified(req.id);
+        }
+      });
+    } else {
+      // Subsequent polls — notify for any genuinely new incoming requests
+      incoming.forEach(req => {
+        if (!knownRequestIdsRef.current!.has(req.id)) {
+          const name = req.display_name || req.from_beam || req.beam_identity || 'Someone';
+          notifyFriendRequest(name);
+          markFrNotified(req.id);
+        }
+      });
+      knownRequestIdsRef.current = new Set(rq.map(r => r.id));
+    }
     setFriends(fr);
     setRequests(rq);
-  }, []);
+  }, [notifyFriendRequest]);
 
+  // Initial load + poll every 30 s
   useEffect(() => {
     loadFriends();
+    const id = setInterval(loadFriends, 30_000);
+    return () => clearInterval(id);
   }, [loadFriends]);
 
-  // DM WebSocket
+  // Immediate refresh when the tab regains focus
   useEffect(() => {
-    const rawUrl = getDmUrl();
-    if (!rawUrl) return;
+    function onVisible() {
+      if (document.visibilityState === 'visible') loadFriends();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [loadFriends]);
 
-    const wsUrl = rawUrl.replace(/^http/, 'ws');
-    const token = getToken();
-    const url = `${wsUrl}/ws?token=${encodeURIComponent(token ?? '')}`;
-
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => { setDmWs(ws); };
-
-    ws.onmessage = (e) => {
+  // Listen for incoming DMs on the shared WS to keep the conversation
+  // sidebar up to date and fire desktop notifications.
+  // DirectMessage has no "type" field — detect DMs by the presence of sender_beam.
+  useEffect(() => {
+    if (!dmWs) return;
+    const handler = (e: MessageEvent) => {
       try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'dm') {
-          const fromBeam: string = data.from || '';
-          setConversations(prev => {
-            const exists = prev.some(c => c.beamIdentity === fromBeam);
-            if (!exists && fromBeam) {
-              return [{ beamIdentity: fromBeam, displayName: fromBeam, lastSnippet: data.content }, ...prev];
-            }
-            return prev.map(c =>
-              c.beamIdentity === fromBeam
-                ? { ...c, lastSnippet: data.content }
-                : c
-            );
-          });
-          notifyDm(fromBeam, data.content ?? '');
-        }
+        const data = JSON.parse(e.data as string);
+        const fromBeam: string = data.sender_beam ?? data.from ?? '';
+        if (!fromBeam) return; // system / pong / sent messages have no sender
+        setConversations(prev => {
+          const exists = prev.some(c => c.beamIdentity === fromBeam);
+          if (!exists) {
+            return [{ beamIdentity: fromBeam, displayName: fromBeam, lastSnippet: data.content }, ...prev];
+          }
+          return prev.map(c =>
+            c.beamIdentity === fromBeam
+              ? { ...c, lastSnippet: data.content }
+              : c
+          );
+        });
+        notifyDm(fromBeam, data.content ?? '');
       } catch {
-        // ignore
+        // ignore parse errors
       }
     };
-
-    ws.onerror = () => {};
-
-    ws.onclose = () => {
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-        setDmWs(null);
-      }
-    };
-
-    return () => {
-      // Null wsRef immediately so the next mount creates a fresh socket.
-      if (wsRef.current === ws) wsRef.current = null;
-      // Detach all handlers to prevent stale state updates.
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      ws.onclose = null;
-      setDmWs(null);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      } else if (ws.readyState === WebSocket.CONNECTING) {
-        // Defer close until connected to avoid the browser error
-        // "WebSocket closed before connection was established".
-        ws.addEventListener('open', () => ws.close(), { once: true });
-      }
-    };
-  }, []);
+    dmWs.addEventListener('message', handler);
+    return () => dmWs.removeEventListener('message', handler);
+  }, [dmWs, notifyDm]);
 
   function handleSelectDm(beam: string, displayName: string) {
     setPanel({ dm: beam, displayName });
