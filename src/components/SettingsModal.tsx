@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import { getBeamIdentity } from '../auth';
-import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL } from '../config';
+import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL, sanitizeServerUrl } from '../config';
 import styles from './SettingsModal.module.css';
 
 interface Props {
@@ -26,11 +26,31 @@ export default function SettingsModal({ onClose, onLogout }: Props) {
     localStorage.getItem('zcloud_url') || ENV_ZCLOUD_URL
   );
   const [saved, setSaved] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   function handleSave() {
-    localStorage.setItem('auth_server_url', authUrl);
-    localStorage.setItem('dm_server_url', dmUrl);
-    localStorage.setItem('zcloud_url', zcloudUrl);
+    // Validate every non-empty URL before persisting.
+    const entries: [string, string][] = [
+      [authUrl, 'Auth Server'],
+      [dmUrl, 'DM Server'],
+      [zcloudUrl, 'ZCloud URL'],
+    ];
+    for (const [url, label] of entries) {
+      if (url && !sanitizeServerUrl(url, '')) {
+        setUrlError(`${label}: must be a valid http(s) URL (e.g. https://api.example.com)`);
+        return;
+      }
+    }
+    setUrlError(null);
+
+    // Persist or clear each entry (empty → remove key → falls back to ENV default).
+    if (authUrl)   localStorage.setItem('auth_server_url', authUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('auth_server_url');
+    if (dmUrl)     localStorage.setItem('dm_server_url', dmUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('dm_server_url');
+    if (zcloudUrl) localStorage.setItem('zcloud_url', zcloudUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('zcloud_url');
+
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -86,6 +106,11 @@ export default function SettingsModal({ onClose, onLogout }: Props) {
             placeholder="http://..."
             spellCheck={false}
           />
+          {urlError && (
+            <p style={{ color: 'var(--error, #e05252)', fontSize: 12, margin: '6px 0 0' }}>
+              {urlError}
+            </p>
+          )}
           <button className={`${styles.saveBtn} ${saved ? styles.saveBtnDone : ''}`} onClick={handleSave}>
             {saved ? 'Saved!' : 'Save'}
           </button>

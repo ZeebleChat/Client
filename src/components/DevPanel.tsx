@@ -10,9 +10,6 @@ import {
 } from '../api';
 import styles from './DevPanel.module.css';
 
-// Hard-coded owner — must match the HARDCODED_OWNER constant in the Rust backend.
-// Front-end check is only for UX (hiding buttons). The backend always re-verifies.
-const OWNER_IDENTITY = 'creeper7»l0na6';
 
 type Tab = 'overview' | 'promos' | 'users' | 'servers' | 'broadcasts' | 'bans' | 'staff' | 'config';
 
@@ -527,10 +524,6 @@ function ConfigTab() {
       <div className={styles.configNote}>
         Runtime config is managed via environment variables on the zbeam server.
         Restart required after changes.
-      </div>
-      <div className={styles.configRow}>
-        <span className={styles.configKey}>HARDCODED_OWNER</span>
-        <code className={styles.configVal}>{OWNER_IDENTITY}</code>
       </div>
       <div className={styles.configRow}>
         <span className={styles.configKey}>AUTH_RATE_LIMIT_REQUESTS</span>

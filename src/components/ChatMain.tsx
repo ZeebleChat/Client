@@ -36,13 +36,17 @@ function injectMentionHighlights(html: string, myName: string): string {
   }).join('');
 }
 
+function encodeAttr(s: string): string {
+  return s.replace(/[&"<>]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' }[c]!));
+}
+
 function expandPackEmojis(text: string, emojis: PackEmojiEntry[], baseUrl: string): string {
   if (!emojis.length) return text;
   const map = new Map(emojis.map(e => [e.shortcode, e]));
   return text.replace(/:([a-z0-9_+\-]{1,40}):/g, (match, code) => {
     const entry = map.get(code);
     if (!entry) return match;
-    const src = baseUrl + entry.file;
+    const src = encodeAttr(baseUrl + entry.file);
     return `<img src="${src}" alt=":${entry.shortcode}:" class="pack-emoji" title=":${entry.shortcode}:" loading="eager" />`;
   });
 }

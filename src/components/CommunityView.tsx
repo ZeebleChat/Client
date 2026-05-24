@@ -3,6 +3,7 @@ import jsYaml from 'js-yaml';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { loadStripe } from '@stripe/stripe-js';
+import { fetchStripePublishableKey } from '../api';
 import type { Stripe, StripeCardElement } from '@stripe/stripe-js';
 import type { UseResourcePackReturn } from '../hooks/useResourcePack';
 import type { PackMeta } from '../resourcePack';
@@ -20,7 +21,7 @@ import {
 } from '../api';
 import styles from './CommunityView.module.css';
 
-const stripePromise = loadStripe('pk_live_51TDqoL3D524x7zwNWBF2QWsFCixoCww15vFqIvCX6nGv0NIMw51zgM3OakA7sop5Jw6LQ3XDP8GYBftKPQc21C0500U3iLuR2O');
+const stripePromise = fetchStripePublishableKey().then(key => key ? loadStripe(key) : null);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

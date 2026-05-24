@@ -33,12 +33,21 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
     }
 
     const wsUrl = rawUrl.replace(/^http/, 'ws');
-    const url = `${wsUrl}/ws?token=${encodeURIComponent(token)}`;
+    // Do NOT embed the JWT in the URL — it would appear in server access logs
+    // and browser history.  Instead we send a { type: "auth", token } message
+    // as the very first frame after the connection opens, mirroring the pattern
+    // used by the channel WebSocket (useWebSocket.ts).
+    const url = `${wsUrl}/ws`;
     const socket = new WebSocket(url);
     wsRef.current = socket;
 
     socket.onopen = () => {
       reconnectDelay.current = RECONNECT_BASE_MS;
+      // Authenticate via first message so the token never touches the URL.
+      const currentToken = getToken();
+      if (currentToken) {
+        socket.send(JSON.stringify({ type: 'auth', token: currentToken }));
+      }
       setWs(socket);
     };
 

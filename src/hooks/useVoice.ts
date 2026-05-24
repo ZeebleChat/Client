@@ -176,6 +176,7 @@ export function useVoice() {
     if (from === getBeamIdentity()) return; // skip own echo
     try {
       const binary = atob(base64data);
+      if (binary.length > 4096) return; // drop oversized frames (Opus frame max ~120ms @ 48kbps)
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const { decoder } = getOrCreateDecoder(from);

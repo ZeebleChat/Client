@@ -1034,8 +1034,8 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [requests, setRequests] = useState<ApiFriendRequest[]>([]);
   const [conversations, setConversations] = useState<DmConversation[]>([]);
-  // useDmWebSocket: auto-reconnects, passes token as ?token= (required by zpulse),
-  // and waits for the auth token before opening the first connection.
+  // useDmWebSocket: auto-reconnects; sends { type:"auth", token } as the first
+  // WebSocket frame (never in the URL) and waits for the token before connecting.
   const dmWs = useDmWebSocket(true);
   const { notifyDm, notifyFriendRequest } = useNotifications();
   const knownRequestIdsRef = useRef<Set<string | number> | null>(null);

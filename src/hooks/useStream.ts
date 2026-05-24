@@ -221,6 +221,7 @@ export function useStream() {
     if (!audioCtxRef.current || stateRef.current.status !== 'viewing') return;
     try {
       const binary = atob(base64data);
+      if (binary.length > 4096) return; // drop oversized frames (Opus frame max ~120ms @ 48kbps)
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const entry = decoderRef.current;

@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadStripe } from '@stripe/stripe-js';
+import { fetchStripePublishableKey } from '../api';
 import {
   getAccountInfo,
   oauthStart,
@@ -49,9 +50,9 @@ import {
   type ParentalControls,
 } from '../api';
 
-const stripePromise = loadStripe('pk_live_51TDqoL3D524x7zwNWBF2QWsFCixoCww15vFqIvCX6nGv0NIMw51zgM3OakA7sop5Jw6LQ3XDP8GYBftKPQc21C0500U3iLuR2O');
+const stripePromise = fetchStripePublishableKey().then(key => key ? loadStripe(key) : null);
 import { getBeamIdentity, getToken, saveSession } from '../auth';
-import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL } from '../config';
+import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL, sanitizeServerUrl } from '../config';
 import { setAvatarCache, getAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCache';
 import { useTheme, type Theme } from '../hooks/useTheme';
 import PermissionGate from './PermissionGate';
@@ -1873,6 +1874,7 @@ function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
     localStorage.getItem('zcloud_url') || ENV_ZCLOUD_URL
   );
   const [saved, setSaved] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [closeToTray, setCloseToTray] = usePref('close_to_tray', false);
 
   // Sync saved pref into Tauri on mount so the setting survives restarts.
@@ -1891,9 +1893,28 @@ function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
   }
 
   function handleSave() {
-    localStorage.setItem('auth_server_url', authUrl);
-    localStorage.setItem('dm_server_url', dmUrl);
-    localStorage.setItem('zcloud_url', zcloudUrl);
+    // Validate every non-empty URL before persisting.
+    const entries: [string, string][] = [
+      [authUrl, 'Auth Server'],
+      [dmUrl, 'DM Server'],
+      [zcloudUrl, 'ZCloud URL'],
+    ];
+    for (const [url, label] of entries) {
+      if (url && !sanitizeServerUrl(url, '')) {
+        setUrlError(`${label}: must be a valid http(s) URL (e.g. https://api.example.com)`);
+        return;
+      }
+    }
+    setUrlError(null);
+
+    // Persist or clear each entry (empty → remove key → falls back to ENV default).
+    if (authUrl)   localStorage.setItem('auth_server_url', authUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('auth_server_url');
+    if (dmUrl)     localStorage.setItem('dm_server_url', dmUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('dm_server_url');
+    if (zcloudUrl) localStorage.setItem('zcloud_url', zcloudUrl.replace(/\/+$/, ''));
+    else           localStorage.removeItem('zcloud_url');
+
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -1935,6 +1956,11 @@ function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
         />
       </div>
 
+      {urlError && (
+        <p style={{ color: 'var(--error, #e05252)', fontSize: 12, margin: '6px 0 0' }}>
+          {urlError}
+        </p>
+      )}
       <button
         className={`${styles.saveBtn} ${saved ? styles.saveBtnDone : ''}`}
         onClick={handleSave}

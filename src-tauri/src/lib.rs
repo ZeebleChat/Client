@@ -129,6 +129,9 @@ type CaptureState = Mutex<Option<CaptureHandle>>;
 //     • Notification.requestPermission() always resolves to 'granted'
 //     • new Notification() routes through tauri-plugin-notification (no browser
 //       permission popup ever)
+//     This is intentional: we are a native desktop app, not a website. The real
+//     permission gate is the OS (Windows notification settings / macOS prefs).
+//     In-app granular toggles live in AccountModal → Notifications tab.
 //
 //  2. Overrides navigator.permissions.query to return 'granted' for mic/camera/
 //     notifications so all JS permission guards pass immediately.

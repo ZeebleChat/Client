@@ -1274,10 +1274,10 @@ export async function redeemIchorForPremium(): Promise<{ ok: boolean; error?: st
 
 export async function updateDisplayName(name: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${getAuthUrl()}/account/name`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/name`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: getToken(), new_display_name: name }),
+      body: JSON.stringify({ new_display_name: name }),
     });
     if (!res.ok) {
       const data = await safeJson(res);
@@ -1289,10 +1289,10 @@ export async function updateDisplayName(name: string): Promise<{ ok: boolean; er
 
 export async function updateEmail(email: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${getAuthUrl()}/account/email`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: getToken(), new_email: email }),
+      body: JSON.stringify({ new_email: email }),
     });
     if (!res.ok) {
       const data = await safeJson(res);
@@ -1306,8 +1306,8 @@ export async function sendEmailPinReq(token: string, email: string): Promise<{ o
   try {
     const res = await fetch(`${getAuthUrl()}/account/email/send-pin`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, email }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email }),
     });
     const data = await safeJson(res);
     if (!res.ok) return { ok: false, error: data.error as string };
@@ -1319,8 +1319,8 @@ export async function verifyEmailPinReq(token: string, pin: string): Promise<{ o
   try {
     const res = await fetch(`${getAuthUrl()}/account/email/verify-pin`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, pin }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ pin }),
     });
     const data = await safeJson(res);
     if (!res.ok) return { ok: false, error: data.error as string };
@@ -1356,10 +1356,10 @@ export async function resetPasswordWithPinReq(email: string, pin: string, new_pa
 
 export async function updatePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${getAuthUrl()}/account/password`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: getToken(), current_password: currentPassword, new_password: newPassword }),
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     });
     if (!res.ok) {
       const data = await safeJson(res);
@@ -1431,12 +1431,11 @@ export async function createSubAccount(
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   try {
     const body: Record<string, unknown> = {
-      parent_token: getToken(),
       display_name: displayName,
       account_type: accountType,
     };
     if (password) body.password = password;
-    const res = await fetch(`${getAuthUrl()}/account/sub`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/sub`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1458,10 +1457,10 @@ export async function deleteSubAccount(subId: string): Promise<{ ok: boolean; er
 
 async function childAction(childId: string, action: unknown): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${getAuthUrl()}/account/child/action`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/child/action`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ parent_token: getToken(), sub_id: childId, action }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_id: childId, action }),
     });
     if (!res.ok) {
       const d = await safeJson(res);
@@ -1480,10 +1479,10 @@ export const setChildParentalControls = (id: string, controls: ParentalControls)
 
 export async function regenBotKey(botId: string): Promise<{ ok: boolean; new_token?: string; error?: string }> {
   try {
-    const res = await fetch(`${getAuthUrl()}/account/bot/rotate`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/bot/rotate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ parent_token: getToken(), bot_id: botId }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bot_id: botId }),
     });
     if (!res.ok) {
       const d = await safeJson(res);
@@ -1497,13 +1496,8 @@ export async function regenBotKey(botId: string): Promise<{ ok: boolean; new_tok
 // ── 2FA / TOTP ────────────────────────────────────────────────────────────────
 
 export async function setupTotp(): Promise<{ ok: boolean; secret?: string; otpauth_url?: string; error?: string }> {
-  const token = getToken();
   try {
-    const res = await fetch(`${getAuthUrl()}/account/totp/setup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
+    const res = await authedFetch(`${getAuthUrl()}/account/totp/setup`, { method: 'POST' });
     const data = await safeJson(res);
     if (!res.ok) return { ok: false, error: data.error as string };
     return { ok: true, secret: data.secret as string, otpauth_url: data.otpauth_url as string };
@@ -1511,12 +1505,11 @@ export async function setupTotp(): Promise<{ ok: boolean; secret?: string; otpau
 }
 
 export async function enableTotp(code: string): Promise<{ ok: boolean; error?: string }> {
-  const token = getToken();
   try {
-    const res = await fetch(`${getAuthUrl()}/account/totp/enable`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/totp/enable`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, code }),
+      body: JSON.stringify({ code }),
     });
     const data = await safeJson(res);
     return { ok: res.ok, error: data.error as string };
@@ -1524,12 +1517,11 @@ export async function enableTotp(code: string): Promise<{ ok: boolean; error?: s
 }
 
 export async function disableTotp(password: string): Promise<{ ok: boolean; error?: string }> {
-  const token = getToken();
   try {
-    const res = await fetch(`${getAuthUrl()}/account/totp`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/totp`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, password }),
+      body: JSON.stringify({ password }),
     });
     const data = await safeJson(res);
     return { ok: res.ok, error: data.error as string };
@@ -1537,12 +1529,11 @@ export async function disableTotp(password: string): Promise<{ ok: boolean; erro
 }
 
 export async function generateRecoveryCodes(password: string): Promise<{ ok: boolean; codes?: string[]; error?: string }> {
-  const token = getToken();
   try {
-    const res = await fetch(`${getAuthUrl()}/account/recovery-codes`, {
+    const res = await authedFetch(`${getAuthUrl()}/account/recovery-codes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, password }),
+      body: JSON.stringify({ password }),
     });
     const data = await safeJson(res);
     if (!res.ok) return { ok: false, error: data.error as string };
@@ -1680,8 +1671,7 @@ export async function validateToken(): Promise<'valid' | 'invalid' | 'network_er
     if (!token) return 'invalid';
     const res = await fetch(`${getAuthUrl()}/validate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ token }),
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(8000),
     });
     if (res.status === 401 || res.status === 403) return 'invalid';
@@ -1722,6 +1712,15 @@ export interface AdminMe {
   uid: string;
   role: 'owner' | 'staff';
   is_owner: boolean;
+}
+
+export async function fetchStripePublishableKey(): Promise<string | null> {
+  try {
+    const res = await fetch(`${getAuthUrl()}/stripe/config`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { publishable_key?: string };
+    return data.publishable_key ?? null;
+  } catch { return null; }
 }
 
 export async function adminGetMe(): Promise<AdminMe | null> {
@@ -2014,7 +2013,7 @@ export async function oauthStart(provider: OAuthProvider): Promise<OAuthStartRes
 
 export async function oauthPoll(state: string): Promise<OAuthPollResult> {
   try {
-    const res = await fetch(`${getAuthUrl()}/oauth/poll?state=${encodeURIComponent(state)}`);
+    const res = await authedFetch(`${getAuthUrl()}/oauth/poll?state=${encodeURIComponent(state)}`);
     if (!res.ok) return { ready: false };
     return res.json();
   } catch { return { ready: false }; }

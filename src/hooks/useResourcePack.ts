@@ -38,6 +38,18 @@ async function loadPackFromBase(baseUrl: string): Promise<LoadedPack> {
   if (meta.assets.emojis?.manifest) {
     try {
       emojiManifest = await fetchJson<EmojiManifest>(`${base}${meta.assets.emojis.manifest}`);
+      // Strip any emoji entries whose file path isn't a safe relative image path.
+      // This prevents a malicious market pack from injecting URLs or attribute
+      // payloads via entry.file when it's interpolated into HTML in ChatMain.
+      if (emojiManifest) {
+        emojiManifest.emojis = emojiManifest.emojis.filter(e =>
+          typeof e.file === 'string' &&
+          !e.file.includes('..') &&
+          !/^[a-z][a-z0-9+\-.]*:/i.test(e.file) &&    // no protocol (http:, data:, …)
+          !/[?#"'<>]/.test(e.file) &&                   // no query/fragment/attr-break chars
+          /\.(?:png|gif|webp|svg|apng)$/i.test(e.file) // must end with an image extension
+        );
+      }
     } catch {
       // emojis are optional
     }
