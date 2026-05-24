@@ -15,16 +15,17 @@ export function useNotifications() {
     senderBeam: string,
     content: string,
     activeChannelId: string | number | null,
-    msgChannelId: string | number
+    msgChannelId: string | number,
+    serverMentions?: string[]
   ) => {
     const myId = getBeamIdentity();
     if (senderBeam === myId) return;
     if (String(activeChannelId) === String(msgChannelId)) return;
 
     const myName = localStorage.getItem('cached_display_name') || myId || '';
-    const isMention = myName
-      ? content.toLowerCase().includes(`@${myName.toLowerCase()}`)
-      : false;
+    const isMention =
+      (myId != null && (serverMentions ?? []).includes(myId)) ||
+      (myName ? content.toLowerCase().includes(`@${myName.toLowerCase()}`) : false);
 
     const notifAllMsg  = localStorage.getItem('notif_all_msg') === 'true';
     const notifMention = localStorage.getItem('notif_mention') !== 'false';

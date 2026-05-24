@@ -215,7 +215,8 @@ export default function App() {
         event.msg.beam_identity,
         event.msg.content,
         activeChannelRef.current?.id ?? null,
-        event.msg.channel_id
+        event.msg.channel_id,
+        event.msg.mentions
       );
       const myId = getBeamIdentity();
       const isMentioned = !!(myId && event.msg.beam_identity !== myId && event.msg.mentions?.includes(myId));
@@ -355,11 +356,11 @@ export default function App() {
     });
     setMentionCounts(prev => {
       if (!prev[String(channel.id)]) return prev;
-      clearPingsForChannel(`#${channel.name}`);
       const next = { ...prev };
       delete next[String(channel.id)];
       return next;
     });
+    clearPingsForChannel(`#${channel.name}`);
     markChannelRead(channel.id);
     setMessages([]);
     setMessagesLoading(true);

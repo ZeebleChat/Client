@@ -4,6 +4,70 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State, Emitter};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 
+// ── Windows toast identity ────────────────────────────────────────────────────
+//
+// In dev mode (tauri dev / cargo run) the process has no registered AUMID so
+// Windows attributes toast notifications to the parent terminal ("PowerShell").
+// Fix: call SetCurrentProcessExplicitAppUserModelID from shell32.dll and write
+// the display-name + icon into the registry so every toast reads "Zeeble".
+// No extra Cargo dependencies needed — shell32 is always present on Windows.
+
+#[cfg(target_os = "windows")]
+mod win_toast {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::process::CommandExt as _;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(appid: *const u16) -> i32;
+    }
+
+    pub fn register() {
+        const AUMID: &str = "xyz.zeeble.desktop";
+
+        // 1. Brand this process with the AUMID so WinRT picks it up immediately.
+        let wide: Vec<u16> = OsStr::new(AUMID)
+            .encode_wide()
+            .chain(std::iter::once(0u16))
+            .collect();
+        unsafe { SetCurrentProcessExplicitAppUserModelID(wide.as_ptr()); }
+
+        // 2. Persist the display name in the registry (idempotent, very fast).
+        let reg_key = format!("HKCU\\SOFTWARE\\Classes\\AppUserModelId\\{AUMID}");
+        let _ = std::process::Command::new("reg")
+            .args(["add", &reg_key, "/v", "DisplayName",
+                   "/t", "REG_EXPAND_SZ", "/d", "Zeeble", "/f"])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output();
+
+        // 3. Point the registry entry at the Zeeble icon so the toast tile
+        //    shows the app icon instead of a blank square.
+        //    Dev layout:  src-tauri/icons/icon.ico  (CARGO_MANIFEST_DIR)
+        //    Prod layout: <install-dir>/icons/icon.ico (next to the exe)
+        let dev_icon = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("icons")
+            .join("icon.ico");
+        let prod_icon = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("icons").join("icon.ico")));
+
+        let icon_path = [Some(dev_icon), prod_icon]
+            .into_iter()
+            .flatten()
+            .find(|p| p.exists());
+
+        if let Some(path) = icon_path {
+            let _ = std::process::Command::new("reg")
+                .args(["add", &reg_key, "/v", "IconUri",
+                       "/t", "REG_EXPAND_SZ",
+                       "/d", path.to_string_lossy().as_ref(), "/f"])
+                .creation_flags(0x0800_0000)
+                .output();
+        }
+    }
+}
+
 // ── Close-to-tray state ───────────────────────────────────────────────────────
 
 struct CloseToTrayState {
@@ -85,7 +149,6 @@ const PERM_COMPAT_JS: &str = r#"
                 options: {
                     title: title,
                     body:  (options && options.body)  ? options.body  : undefined,
-                    icon:  (options && options.icon)  ? options.icon  : undefined,
                 }
             }).catch(function () {});
         }
@@ -395,6 +458,11 @@ async fn check_for_updates(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Register the Zeeble AUMID before anything else so every WinRT toast
+    // shows "Zeeble" with the app icon from the very first notification.
+    #[cfg(target_os = "windows")]
+    win_toast::register();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

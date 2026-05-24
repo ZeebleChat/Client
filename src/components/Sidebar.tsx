@@ -895,6 +895,9 @@ export default function Sidebar({
                         {mentionCount > 0 && (
                           <span className={styles.mentionBadge}>{mentionCount}</span>
                         )}
+                        {isUnread && mentionCount === 0 && (
+                          <span className={styles.unreadDot} />
+                        )}
                         <button
                           className={styles.chGearBtn}
                           title="Channel settings"
@@ -1092,6 +1095,9 @@ export default function Sidebar({
                         <span className={styles.chName}>{ch.name}</span>
                         {mentionCount > 0 && (
                           <span className={styles.mentionBadge}>{mentionCount}</span>
+                        )}
+                        {isUnread && mentionCount === 0 && (
+                          <span className={styles.unreadDot} />
                         )}
                         <button
                           className={styles.chGearBtn}

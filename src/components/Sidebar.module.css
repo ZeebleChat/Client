@@ -290,17 +290,32 @@
 
 .chItem.unread {
   color: var(--text-1);
+  font-weight: 700;
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chItem.unread .chIcon {
+  opacity: 1;
 }
 
 .chItem.mentioned {
   color: var(--text-1);
+  font-weight: 700;
   background: rgba(239, 68, 68, 0.08);
   box-shadow: inset 3px 0 0 #ef4444;
 }
 
 .chItem.mentioned .chIcon {
   opacity: 1;
+}
+
+.unreadDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-1);
+  margin-left: auto;
 }
 
 .mentionBadge {

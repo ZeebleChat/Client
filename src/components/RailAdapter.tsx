@@ -197,7 +197,7 @@ export default function RailAdapter({ servers, activeServerUrl, view, onSelectSe
         const isOffline = offlineServers.has(server.server_url);
         const notif = serverNotifMap[server.server_url];
         const hasMention = !!notif?.hasMention;
-        const hasUnread  = !isActive && !hasMention && !!notif?.hasUnread;
+        const hasUnread  = !hasMention && !!notif?.hasUnread;
         return (
           <div
             key={server.server_url}
