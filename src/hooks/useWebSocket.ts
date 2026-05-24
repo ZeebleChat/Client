@@ -62,8 +62,7 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
   }, []);
 
   const joinChannel = useCallback((cid: string | number) => {
-    const token = getChatToken(getServerUrl()) || getToken();
-    send({ type: 'join', token, channel_id: String(cid) });
+    send({ type: 'join', channel_id: String(cid) });
   }, [send]);
 
   const connect = useCallback(() => {
@@ -95,7 +94,7 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
       if (serverUrl) {
         const m = serverUrl.match(/\/servers\/([0-9a-f-]{8,})/i);
         const serverId = m ? m[1] : serverUrl;
-        send({ type: 'activate', server_id: serverId, token });
+        send({ type: 'activate', server_id: serverId });
       }
 
       if (channelIdRef.current != null) {
@@ -266,14 +265,11 @@ export function buildChatMessagePayload(
   attachmentIds: (string | number)[] = [],
   opts?: { title?: string; replyTo?: string | number },
 ) {
-  const serverUrl = getServerUrl();
-  const token = getChatToken(serverUrl) || getToken();
   const beamId = getBeamIdentity();
   const isCloud = attachmentIds.length > 0 && typeof attachmentIds[0] === 'string';
   return {
     payload: {
       type: 'message',
-      token,
       channel_id: String(channelId),
       content,
       ...(opts?.title ? { title: opts.title } : {}),
