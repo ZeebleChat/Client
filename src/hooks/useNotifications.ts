@@ -1,13 +1,25 @@
 import { useCallback } from 'react';
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getBeamIdentity } from '../auth';
 import { addNotification } from '../notificationStore';
 
+// True when running inside the Tauri desktop shell.
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 export function useNotifications() {
   const notify = useCallback((title: string, body: string, tag?: string) => {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
     if (localStorage.getItem('notif_desktop') === 'false') return;
-    new Notification(title, { body, tag, icon: '/icons/128x128.png' });
+
+    if (isTauri) {
+      // Route through tauri-plugin-notification so the WinRT toast is sent
+      // from the host process (which has the "Zeeble" AUMID registered) rather
+      // than via WebView2's renderer, which would attribute it to PowerShell.
+      sendNotification({ title, body });
+    } else {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+      new Notification(title, { body, tag, icon: '/icons/128x128.png' });
+    }
   }, []);
 
   const notifyMessage = useCallback((
