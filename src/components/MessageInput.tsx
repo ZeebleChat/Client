@@ -173,9 +173,23 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
     await uploadAndStage(file);
   }
 
+  // During dragover, webkitGetAsEntry() is unreliable; type==='' is the best available signal.
+  // During drop, webkitGetAsEntry() works and is authoritative; fall back to the type heuristic.
+  function hasDirectoryItem(items: DataTransferItemList, inDrop: boolean): boolean {
+    return Array.from(items).some(item => {
+      if (item.kind !== 'file') return false;
+      if (inDrop) {
+        const entry = item.webkitGetAsEntry?.();
+        if (entry) return entry.isDirectory;
+      }
+      return item.type === '';
+    });
+  }
+
   async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
+    if (hasDirectoryItem(e.dataTransfer.items, true)) return;
     const file = e.dataTransfer.files[0];
     if (!file) return;
     inputRef.current?.focus();
@@ -301,7 +315,7 @@ const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function 
   return (
     <div
       className={`${styles.root} ${dragOver ? styles.dragOver : ''}`}
-      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragOver={e => { if (hasDirectoryItem(e.dataTransfer.items, false)) return; e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >

@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getDmUrl } from '../config';
-import { getToken } from '../auth';
+import { getToken, forceLogout } from '../auth';
+import { refreshAccessToken } from '../api/core';
 
 const RECONNECT_BASE_MS = 3_000;
 const RECONNECT_MAX_MS = 30_000;
+
+function isTokenExpired(token: string): boolean {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const { exp } = JSON.parse(atob(b64)) as { exp?: number };
+    return typeof exp === 'number' && exp < Date.now() / 1000 + 60;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Persistent DM WebSocket that lives at App level.
@@ -41,10 +52,14 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
     const socket = new WebSocket(url);
     wsRef.current = socket;
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       reconnectDelay.current = RECONNECT_BASE_MS;
-      // Authenticate via first message so the token never touches the URL.
-      const currentToken = getToken();
+      let currentToken = getToken();
+      if (isTokenExpired(currentToken)) {
+        const result = await refreshAccessToken();
+        if (result === 'auth_error') { forceLogout(); socket.close(); return; }
+        currentToken = getToken();
+      }
       if (currentToken) {
         socket.send(JSON.stringify({ type: 'auth', token: currentToken }));
       }

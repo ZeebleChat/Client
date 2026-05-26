@@ -177,6 +177,7 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const [messages, setMessages] = useState<ApiDmMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(true);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [emojiPickerTheme, setEmojiPickerTheme] = useState(() => getEmojiPickerTheme());
   const [gifOpen, setGifOpen] = useState(false);
@@ -201,11 +202,10 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
 
   const annotated = useMemo(() => messages.map((msg, i) => {
     const prev = messages[i - 1];
-    const next = messages[i + 1];
     const tsMs = getTimestampMs(msg.created_at);
-    const sameAsPrev = !!prev && prev.from === msg.from && (tsMs - getTimestampMs(prev.created_at)) < 5 * 60 * 1000;
-    const sameAsNext = !!next && next.from === msg.from && (getTimestampMs(next.created_at) - tsMs) < 5 * 60 * 1000;
-    return { ...msg, isFirst: !sameAsPrev, isLast: !sameAsNext, newDay: !prev || !isSameDay(prev.created_at, msg.created_at) };
+    const isFirst = !prev || prev.from !== msg.from || (tsMs - getTimestampMs(prev.created_at)) >= 5 * 60 * 1000;
+    const newDay = !prev || !isSameDay(prev.created_at, msg.created_at);
+    return { ...msg, isFirst, newDay };
   }), [messages]);
 
   useEffect(() => {
@@ -394,13 +394,23 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   }
 
   return (
+    <div className={styles.dmPanelOuter}>
     <div className={styles.dmPanel}>
       <div className={styles.dmHeader}>
-        <UserAvatar name={displayName} size={36} />
-        <div className={styles.dmHeaderInfo}>
-          <span className={styles.dmHeaderName}>{displayName}</span>
-          <span className={styles.dmHeaderBeam}>{beamIdentity}</span>
-        </div>
+        <UserAvatar name={displayName} size={28} />
+        <span className={styles.dmHeaderName}>{displayName}</span>
+        <span className={styles.dmHeaderSep}>—</span>
+        <span className={styles.dmHeaderBeam}>{beamIdentity}</span>
+        <button
+          className={`${styles.dmHeaderIconBtn} ${profileOpen ? styles.dmHeaderIconBtnActive : ''}`}
+          title={profileOpen ? 'Hide profile' : 'Show profile'}
+          onClick={() => setProfileOpen(o => !o)}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </button>
       </div>
 
       <div className={styles.dmMessages} ref={messagesRef}>
@@ -414,11 +424,6 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
         )}
         {annotated.map(msg => {
           const isMine = msg.from === myBeam;
-          const bubblePosClass =
-            msg.isFirst && msg.isLast ? styles.dmBubbleSingle :
-            msg.isFirst               ? styles.dmBubbleFirst :
-            msg.isLast                ? styles.dmBubbleLast :
-                                        styles.dmBubbleMiddle;
           return (
             <Fragment key={String(msg.id)}>
               {msg.newDay && (
@@ -426,19 +431,22 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
                   <span>{formatDateLabel(msg.created_at)}</span>
                 </div>
               )}
-              <div className={`${styles.dmMsgRow} ${isMine ? styles.dmMine : ''} ${!msg.isFirst ? styles.dmMsgGrouped : ''}`}>
-                {!isMine && (
-                  <div className={styles.dmAvatarSlot}>
-                    {msg.isLast && <UserAvatar name={msg.from} size={28} />}
-                  </div>
-                )}
-                <div className={`${styles.dmBubble} ${bubblePosClass}`}>
-                  {!isMine && msg.isFirst && (
-                    <div className={styles.dmSender}>{msg.from}</div>
+              <div className={`${styles.msgRow} ${!msg.isFirst ? styles.msgGrouped : ''}`}>
+                <div className={styles.msgAvatarCol}>
+                  {msg.isFirst && <UserAvatar name={msg.from} size={40} />}
+                </div>
+                <div className={styles.msgContent}>
+                  {msg.isFirst && (
+                    <div className={styles.msgHeader}>
+                      <span className={`${styles.msgAuthor} ${isMine ? styles.msgAuthorMine : ''}`}>
+                        {isMine ? (myBeam || 'You') : msg.from}
+                      </span>
+                      <span className={styles.msgTs}>{formatTs(msg.created_at)}</span>
+                    </div>
                   )}
                   {isGifUrl(msg.content)
                     ? <img src={msg.content} alt="GIF" className={styles.dmAttachImg} />
-                    : msg.content && <div className={styles.dmText}>{msg.content}</div>
+                    : msg.content && <div className={styles.msgText}>{msg.content}</div>
                   }
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className={styles.dmMsgAttachments}>
@@ -447,7 +455,6 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
                       ))}
                     </div>
                   )}
-                  {msg.isLast && <div className={styles.dmTime}>{formatTs(msg.created_at)}</div>}
                 </div>
               </div>
             </Fragment>
@@ -539,6 +546,25 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
           </button>
         </div>
       </div>
+    </div>
+
+    {profileOpen && (
+      <div className={styles.dmProfileSidebar}>
+        <div className={styles.dmProfileBanner} />
+        <div className={styles.dmProfileBody}>
+          <div className={styles.dmProfileAvatarWrap}>
+            <UserAvatar name={displayName} size={86} radius={23} />
+          </div>
+          <div className={styles.dmProfileName}>{displayName}</div>
+          <div className={styles.dmProfileBeam}>{beamIdentity}</div>
+          <div className={styles.dmProfileDivider} />
+          <div className={styles.dmProfileSection}>
+            <div className={styles.dmProfileSectionTitle}>Beam Identity</div>
+            <div className={styles.dmProfileSectionValue}>{beamIdentity}</div>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

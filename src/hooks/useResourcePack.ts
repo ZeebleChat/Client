@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import jsYaml from 'js-yaml';
+import { invoke } from '@tauri-apps/api/core';
 import {
   type PackMeta,
   type PackColors,
@@ -13,16 +14,37 @@ import { setPackSounds, clearPackSounds } from '../sounds';
 const STORAGE_KEY = 'zeeble-active-pack';
 const CSS_OVERRIDE_ID = 'pack-css-overrides';
 
+// ─── packs:// compatibility layer ─────────────────────────────────────────────
+// fetch() is blocked by CSP for custom URI schemes. For packs://localhost/<name>/<path>
+// we route through the read_pack_asset Tauri command instead, which uses IPC (CSP-exempt).
+
+// Extracts the path portion after packs://localhost/ — e.g.
+// "packs://localhost/local/debug/colors.yaml" → "local/debug/colors.yaml"
+function parsePacks(url: string): string | null {
+  const m = url.match(/^packs:\/\/localhost\/(.+)$/);
+  return m ? m[1] : null;
+}
+
+async function readText(url: string): Promise<string> {
+  const relPath = parsePacks(url);
+  if (relPath) return invoke<string>('read_pack_asset', { relPath });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${url} (${res.status})`);
+  return res.text();
+}
+
 // ─── Loaders ──────────────────────────────────────────────────────────────────
 
 async function fetchYaml<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url} (${res.status})`);
-  const text = await res.text();
-  return jsYaml.load(text) as T;
+  return jsYaml.load(await readText(url)) as T;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
+  const relPath = parsePacks(url);
+  if (relPath) {
+    const text = await invoke<string>('read_pack_asset', { relPath });
+    return JSON.parse(text) as T;
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url} (${res.status})`);
   return res.json() as Promise<T>;
@@ -101,8 +123,7 @@ export function useResourcePack(): UseResourcePackReturn {
     }
 
     if (pack.meta.assets.css) {
-      fetch(pack.baseUrl + pack.meta.assets.css)
-        .then(r => r.text())
+      readText(pack.baseUrl + pack.meta.assets.css)
         .then(injectPackCss)
         .catch(() => { /* css is optional */ });
     } else {

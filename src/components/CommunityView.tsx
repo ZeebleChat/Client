@@ -6,7 +6,6 @@ import { loadStripe } from '@stripe/stripe-js';
 import { fetchStripePublishableKey } from '../api';
 import type { Stripe, StripeCardElement } from '@stripe/stripe-js';
 import type { UseResourcePackReturn } from '../hooks/useResourcePack';
-import type { PackMeta } from '../resourcePack';
 import {
   fetchMarketListings,
   uploadPack,
@@ -120,10 +119,9 @@ type SortOption = 'popular' | 'newest' | 'price-asc' | 'price-desc';
 type ListStep = 'pick' | 'details';
 
 function ListPackModal({ onClose, onListed }: { onClose: () => void; onListed: () => void }) {
-  const folderInputRef              = useRef<HTMLInputElement>(null);
+  const fileInputRef                = useRef<HTMLInputElement>(null);
   const [step, setStep]             = useState<ListStep>('pick');
-  const [files, setFiles]           = useState<File[]>([]);
-  const [parsedMeta, setParsedMeta] = useState<PackMeta | null>(null);
+  const [packFile, setPackFile]     = useState<File | null>(null);
   const [name, setName]             = useState('');
   const [category, setCategory]     = useState<PackCategory>('theme-packs');
   const [price, setPrice]           = useState('');
@@ -132,42 +130,14 @@ function ListPackModal({ onClose, onListed }: { onClose: () => void; onListed: (
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState('');
 
-  async function handleFolderSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     setError('');
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
-
-    const allFiles = Array.from(fileList);
-
-    // Find pack.yaml — strip the root folder prefix from webkitRelativePath
-    const packYamlFile = allFiles.find(f => {
-      const parts = f.webkitRelativePath.split('/');
-      return parts.slice(1).join('/') === 'pack.yaml';
-    });
-
-    if (!packYamlFile) {
-      setError('No pack.yaml found in the selected folder.');
-      return;
-    }
-
-    let meta: PackMeta;
-    try {
-      const text = await packYamlFile.text();
-      meta = jsYaml.load(text) as PackMeta;
-    } catch {
-      setError('Could not parse pack.yaml.');
-      return;
-    }
-
-    if (meta.id) {
-      setError('This is a purchased pack and cannot be relisted.');
-      return;
-    }
-
-    setFiles(allFiles);
-    setParsedMeta(meta);
-    setName(meta.name || '');
-    setDesc(meta.description || '');
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setPackFile(file);
+    setName('');
+    setDesc('');
     setPreview('📦');
     setCategory('theme-packs');
     setStep('details');
@@ -175,7 +145,7 @@ function ListPackModal({ onClose, onListed }: { onClose: () => void; onListed: (
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!files.length) return;
+    if (!packFile) return;
     setSubmitting(true);
     setError('');
 
@@ -185,12 +155,7 @@ function ListPackModal({ onClose, onListed }: { onClose: () => void; onListed: (
     formData.append('price_ichor', String(parseInt(price, 10) || 0));
     if (desc.trim()) formData.append('description', desc.trim());
     if (preview.trim()) formData.append('preview_emoji', preview.trim());
-
-    for (const file of files) {
-      // Strip the root folder name: "my_pack/colors.yaml" → "colors.yaml"
-      const relativePath = file.webkitRelativePath.split('/').slice(1).join('/');
-      if (relativePath) formData.append('files', file, relativePath);
-    }
+    formData.append('file', packFile, packFile.name);
 
     const result = await uploadPack(formData);
     setSubmitting(false);
@@ -217,30 +182,28 @@ function ListPackModal({ onClose, onListed }: { onClose: () => void; onListed: (
         {step === 'pick' ? (
           <div className={styles.modalForm}>
             <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
-              Select your pack folder. Packs with a market ID (purchased packs) cannot be relisted.
+              Select a <code>.zblpak</code> or <code>.zip</code> archive. Purchased packs cannot be relisted.
             </p>
             <input
-              ref={folderInputRef}
+              ref={fileInputRef}
               type="file"
               style={{ display: 'none' }}
-              // @ts-expect-error webkitdirectory is not in React's typings
-              webkitdirectory=""
-              multiple
-              onChange={handleFolderSelect}
+              accept=".zblpak,.zip,application/zip,application/x-zip-compressed"
+              onChange={handleFileSelect}
             />
-            <button className={styles.btnPrimary} onClick={() => folderInputRef.current?.click()}>
-              Select Pack Folder
+            <button className={styles.btnPrimary} onClick={() => fileInputRef.current?.click()}>
+              Select Pack Archive
             </button>
             {error && <p className={styles.formError} style={{ marginTop: 12 }}>{error}</p>}
           </div>
         ) : (
           <form className={styles.modalForm} onSubmit={handleSubmit}>
-            {parsedMeta && (
+            {packFile && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '8px 12px', background: 'var(--bg-elevated, #252525)', borderRadius: 8 }}>
-                <span style={{ fontSize: 22 }}>{preview}</span>
+                <span style={{ fontSize: 22 }}>📦</span>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{parsedMeta.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{files.length} files selected</div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{packFile.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{(packFile.size / 1024).toFixed(1)} KB</div>
                 </div>
               </div>
             )}
@@ -458,10 +421,9 @@ function MyPacksTab({ resourcePack }: { resourcePack: UseResourcePackReturn }) {
       ]);
       setPacksDir(dir);
       const infos = await Promise.all(names.map(async (folderName): Promise<LocalPackInfo> => {
-        const baseUrl = `packs://localhost/${folderName}/`;
+        const baseUrl = `packs://localhost/local/${folderName}/`;
         try {
-          const res = await fetch(`${baseUrl}pack.yaml`);
-          const text = await res.text();
+          const text = await invoke<string>('read_pack_asset', { relPath: `local/${folderName}/pack.yaml` });
           const meta = jsYaml.load(text) as { name: string; author: string; version: string; description?: string };
           return { folderName, baseUrl, meta };
         } catch {

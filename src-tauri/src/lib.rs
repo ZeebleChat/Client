@@ -99,7 +99,9 @@ fn mime_for_path(path: &std::path::Path) -> &'static str {
 }
 
 fn packs_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join("packs"))
+    // Use data_dir (AppData\Roaming) + "zeeble\packs" rather than the identifier-
+    // scoped app_data_dir, giving a clean user-facing path: AppData\Roaming\zeeble\packs
+    app.path().data_dir().ok().map(|d| d.join("zeeble").join("packs"))
 }
 
 // ── Capture source descriptor ─────────────────────────────────────────────────
@@ -416,11 +418,11 @@ fn delete_credential(key: String) -> Result<(), String> {
 
 // ── Local packs commands ──────────────────────────────────────────────────────
 
-/// Returns all subdirectory names inside <appDataDir>/packs/.
-/// Creates the directory if it doesn't exist.
+/// Lists pack folder names inside <packs_dir>/local/, creating it if needed.
 #[tauri::command]
 fn list_local_packs(app: AppHandle) -> Vec<String> {
-    let Some(dir) = packs_dir(&app) else { return vec![] };
+    let Some(base) = packs_dir(&app) else { return vec![] };
+    let dir = base.join("local");
     let _ = std::fs::create_dir_all(&dir);
     std::fs::read_dir(&dir)
         .map(|entries| {
@@ -433,12 +435,27 @@ fn list_local_packs(app: AppHandle) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Returns the absolute path to <appDataDir>/packs/, creating it if needed.
+/// Returns the absolute path to <packs_dir>/local/, creating it (and downloads/) if needed.
 #[tauri::command]
 fn get_packs_dir(app: AppHandle) -> String {
-    let dir = packs_dir(&app).unwrap_or_default();
-    let _ = std::fs::create_dir_all(&dir);
-    dir.to_string_lossy().to_string()
+    let base = packs_dir(&app).unwrap_or_default();
+    let _ = std::fs::create_dir_all(base.join("local"));
+    let _ = std::fs::create_dir_all(base.join("downloads"));
+    base.join("local").to_string_lossy().to_string()
+}
+
+/// Reads a text asset from the packs directory via a single relative path
+/// (e.g. "local/debug/pack.yaml" or "downloads/some-pack/colors.yaml").
+/// This is the IPC alternative to fetch('packs://...'), which CSP blocks.
+#[tauri::command]
+fn read_pack_asset(rel_path: String, app: AppHandle) -> Result<String, String> {
+    let Some(dir) = packs_dir(&app) else {
+        return Err("No packs directory".into());
+    };
+    if rel_path.contains("..") {
+        return Err("Invalid path".into());
+    }
+    std::fs::read_to_string(dir.join(&rel_path)).map_err(|e| e.to_string())
 }
 
 // ── App entry point ───────────────────────────────────────────────────────────
@@ -500,6 +517,7 @@ pub fn run() {
             stop_screen_capture,
             list_local_packs,
             get_packs_dir,
+            read_pack_asset,
             save_credential,
             load_credential,
             delete_credential,

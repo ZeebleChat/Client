@@ -1,11 +1,23 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { getWsUrl, getServerUrl } from '../config';
-import { getToken, getChatToken, getBeamIdentity } from '../auth';
+import { getToken, getChatToken, getBeamIdentity, forceLogout } from '../auth';
+import { refreshAccessToken, exchangeToken } from '../api/core';
 import type { ApiMessage, ApiMemberGroup, ApiChannel } from '../api';
 
 const WS_RECONNECT_INITIAL_DELAY_MS = 3000;
 const WS_RECONNECT_MAX_DELAY_MS = 30000;
 const WS_HEARTBEAT_INTERVAL_MS = 45000;
+
+// Returns true if the JWT is expired or expires within the next 60 seconds.
+function isTokenExpired(token: string): boolean {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const { exp } = JSON.parse(atob(b64)) as { exp?: number };
+    return typeof exp === 'number' && exp < Date.now() / 1000 + 60;
+  } catch {
+    return false;
+  }
+}
 
 export type WsEvent =
   | { type: 'message'; msg: ApiMessage }
@@ -84,11 +96,19 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       if (connGenRef.current !== gen) { ws.close(); return; }
 
       const serverUrl = getServerUrl();
-      const token = getChatToken(serverUrl) || getToken();
+      let token = getChatToken(serverUrl) || getToken();
+
+      if (isTokenExpired(token)) {
+        const result = await refreshAccessToken();
+        if (result === 'auth_error') { forceLogout(); ws.close(); return; }
+        if (result === 'refreshed' && serverUrl) await exchangeToken(serverUrl);
+        token = getChatToken(serverUrl) || getToken();
+      }
+
       send({ type: 'auth', token });
 
       if (serverUrl) {
@@ -105,9 +125,16 @@ export function useWebSocket({ serverUrl, channelId, onEvent, onVoiceAudio, onSt
       reconnectDelay.current = WS_RECONNECT_INITIAL_DELAY_MS;
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (heartbeat.current) clearInterval(heartbeat.current);
       if (!shouldReconnect.current) return;
+      // 4401 = auth failure — refresh immediately with no backoff rather than
+      // hammering the server with an expired token on every reconnect attempt.
+      if (event.code === 4401) {
+        reconnectDelay.current = WS_RECONNECT_INITIAL_DELAY_MS;
+        reconnectTimer.current = setTimeout(connect, 0);
+        return;
+      }
       const delay = reconnectDelay.current;
       reconnectTimer.current = setTimeout(connect, delay);
       reconnectDelay.current = Math.min(delay * 2, WS_RECONNECT_MAX_DELAY_MS);
