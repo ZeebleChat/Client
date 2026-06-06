@@ -16,3 +16,4 @@ export * from './oauth';
 export * from './market';
 export * from './stripe';
 export * from './health';
+export * from './bots';

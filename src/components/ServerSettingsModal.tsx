@@ -31,6 +31,12 @@ import {
   setCategoryPermission,
   deleteCategoryPermission,
   fetchOwnerSettings,
+  listBots,
+  createBot,
+  deleteBot,
+  listWebhooks,
+  createWebhook,
+  deleteWebhook,
   type ApiCategory,
   type ApiChannel,
   type ApiMemberGroup,
@@ -39,6 +45,8 @@ import {
   type ChannelPerm,
   type CategoryPerm,
   type OwnerSettings,
+  type ApiBot,
+  type ApiWebhook,
 } from '../api';
 import { getBeamIdentity } from '../auth';
 import { getServerUrl } from '../config';
@@ -51,7 +59,7 @@ interface Props {
   initialTab?: Tab;
 }
 
-type Tab = 'overview' | 'categories' | 'channels' | 'roles' | 'invites' | 'admin';
+type Tab = 'overview' | 'categories' | 'channels' | 'roles' | 'invites' | 'admin' | 'bots' | 'webhooks';
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
@@ -1155,6 +1163,325 @@ function InvitesTab({ isOwner }: { isOwner: boolean }) {
   );
 }
 
+// ── Bots ──────────────────────────────────────────────────────────────────────
+
+function BotsTab({ isOwner }: { isOwner: boolean }) {
+  const [bots, setBots] = useState<ApiBot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState('');
+  const [newToken, setNewToken] = useState<{ name: string; token: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setBots(await listBots());
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleCreate() {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    setCreateErr('');
+    setNewToken(null);
+    const res = await createBot(name);
+    if (res.ok && res.token) {
+      setNewToken({ name: res.name!, token: res.token });
+      setNewName('');
+      await load();
+    } else {
+      setCreateErr(res.error ?? 'Failed to create bot');
+    }
+    setCreating(false);
+  }
+
+  async function handleDelete(id: string, name: string) {
+    if (!window.confirm(`Delete bot "${name}"? Its token will stop working immediately.`)) return;
+    await deleteBot(id);
+    if (newToken?.name === name) setNewToken(null);
+    await load();
+  }
+
+  function copyToken(token: string) {
+    navigator.clipboard.writeText(token).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className={styles.content}>
+      {!isOwner && <OwnerNotice />}
+
+      <div className={styles.sectionTitle}>Bots</div>
+      <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
+        Bots authenticate with <code style={{ background: 'rgba(255,255,255,0.07)', padding: '1px 5px', borderRadius: 3 }}>Authorization: Bot &lt;token&gt;</code> and can send/edit/delete messages and read server data.
+      </p>
+
+      {newToken && (
+        <div style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 'var(--radius-s)', padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 6, fontWeight: 600 }}>
+            Bot "{newToken.name}" created — copy the token now, it won't be shown again.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <code style={{ flex: 1, fontSize: 12, color: 'var(--text-1)', wordBreak: 'break-all', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '6px 8px', borderRadius: 4 }}>
+              {newToken.token}
+            </code>
+            <button className={`${styles.btn} ${styles.btnAccent}`} style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }} onClick={() => copyToken(newToken.token)}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className={styles.emptyHint}>Loading…</div>
+      ) : bots.length === 0 ? (
+        <div className={styles.emptyHint}>No bots yet.</div>
+      ) : (
+        <div className={styles.catList}>
+          {bots.map(bot => (
+            <div key={bot.id} className={styles.catRow}>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {bot.name}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: 'var(--accent)', borderRadius: 3, padding: '1px 4px' }}>BOT</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+                  id: {bot.id} · created by {bot.created_by}
+                </div>
+              </div>
+              {isOwner && (
+                <button
+                  className={`${styles.iconBtn} ${styles.iconBtnDanger}`}
+                  title="Delete bot"
+                  onClick={() => handleDelete(bot.id, bot.name)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isOwner && (
+        <div className={styles.addRow} style={{ marginTop: 16 }}>
+          <input
+            className={`${styles.input} ${styles.inputGrow}`}
+            placeholder="Bot name…"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleCreate()}
+            maxLength={32}
+          />
+          <button
+            className={`${styles.btn} ${styles.btnAccent} ${creating ? styles.btnDisabled : ''}`}
+            onClick={handleCreate}
+            disabled={creating || !newName.trim()}
+          >
+            {creating ? 'Creating…' : 'Create Bot'}
+          </button>
+          {createErr && <span className={styles.errorHint}>{createErr}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
+
+const WEBHOOK_EVENTS = ['message', 'message_edited', 'message_deleted', 'member_join'] as const;
+
+function WebhooksTab({ isOwner }: { isOwner: boolean }) {
+  const [webhooks, setWebhooks] = useState<ApiWebhook[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [newName, setNewName] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+  const [newChannelId, setNewChannelId] = useState('');
+  const [newEvents, setNewEvents] = useState<Set<string>>(new Set(['message']));
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState('');
+  const [newSecret, setNewSecret] = useState<{ name: string; secret: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setWebhooks(await listWebhooks());
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function toggleEvent(ev: string) {
+    setNewEvents(prev => {
+      const next = new Set(prev);
+      if (next.has(ev)) { next.delete(ev); } else { next.add(ev); }
+      return next;
+    });
+  }
+
+  async function handleCreate() {
+    const name = newName.trim();
+    const url = newUrl.trim();
+    if (!name || !url) return;
+    if (newEvents.size === 0) { setCreateErr('Select at least one event'); return; }
+    setCreating(true);
+    setCreateErr('');
+    setNewSecret(null);
+    const res = await createWebhook({
+      name,
+      url,
+      events: [...newEvents].join(','),
+      channel_id: newChannelId.trim() || undefined,
+    });
+    if (res.ok && res.secret) {
+      setNewSecret({ name, secret: res.secret });
+      setNewName('');
+      setNewUrl('');
+      setNewChannelId('');
+      setNewEvents(new Set(['message']));
+      await load();
+    } else {
+      setCreateErr(res.error ?? 'Failed to create webhook');
+    }
+    setCreating(false);
+  }
+
+  async function handleDelete(id: string, name: string) {
+    if (!window.confirm(`Delete webhook "${name}"?`)) return;
+    await deleteWebhook(id);
+    if (newSecret?.name === name) setNewSecret(null);
+    await load();
+  }
+
+  function copySecret(secret: string) {
+    navigator.clipboard.writeText(secret).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className={styles.content}>
+      {!isOwner && <OwnerNotice />}
+
+      <div className={styles.sectionTitle}>Webhooks</div>
+      <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
+        Webhooks POST events to an external URL. Deliveries are signed with HMAC-SHA256 in the <code style={{ background: 'rgba(255,255,255,0.07)', padding: '1px 5px', borderRadius: 3 }}>X-Zeeble-Signature</code> header.
+      </p>
+
+      {newSecret && (
+        <div style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 'var(--radius-s)', padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 6, fontWeight: 600 }}>
+            Webhook "{newSecret.name}" created — copy the signing secret now, it won't be shown again.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <code style={{ flex: 1, fontSize: 12, color: 'var(--text-1)', wordBreak: 'break-all', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '6px 8px', borderRadius: 4 }}>
+              {newSecret.secret}
+            </code>
+            <button className={`${styles.btn} ${styles.btnAccent}`} style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }} onClick={() => copySecret(newSecret.secret)}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className={styles.emptyHint}>Loading…</div>
+      ) : webhooks.length === 0 ? (
+        <div className={styles.emptyHint}>No webhooks yet.</div>
+      ) : (
+        <div className={styles.catList}>
+          {webhooks.map(wh => (
+            <div key={wh.id} className={styles.catRow}>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{wh.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, wordBreak: 'break-all' }}>{wh.url}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                  events: {wh.events}{wh.channel_id ? ` · #${wh.channel_id}` : ' · all channels'}
+                </div>
+              </div>
+              {isOwner && (
+                <button
+                  className={`${styles.iconBtn} ${styles.iconBtnDanger}`}
+                  title="Delete webhook"
+                  onClick={() => handleDelete(wh.id, wh.name)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isOwner && (
+        <div style={{ marginTop: 20 }}>
+          <div className={styles.sectionTitle} style={{ marginBottom: 8 }}>Create Webhook</div>
+          <input
+            className={styles.input}
+            style={{ marginBottom: 8 }}
+            placeholder="Name"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            maxLength={64}
+          />
+          <input
+            className={styles.input}
+            style={{ marginBottom: 8 }}
+            placeholder="URL (https://…)"
+            value={newUrl}
+            onChange={e => setNewUrl(e.target.value)}
+          />
+          <input
+            className={styles.input}
+            style={{ marginBottom: 8 }}
+            placeholder="Channel ID (leave blank for all channels)"
+            value={newChannelId}
+            onChange={e => setNewChannelId(e.target.value)}
+          />
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6 }}>Events</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            {WEBHOOK_EVENTS.map(ev => (
+              <label key={ev} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-2)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={newEvents.has(ev)}
+                  onChange={() => toggleEvent(ev)}
+                  className={styles.permCheck}
+                />
+                {ev}
+              </label>
+            ))}
+          </div>
+          <div className={styles.rowEnd}>
+            {createErr && <span className={styles.feedbackErr}>{createErr}</span>}
+            <button
+              className={`${styles.btn} ${styles.btnAccent} ${creating ? styles.btnDisabled : ''}`}
+              onClick={handleCreate}
+              disabled={creating || !newName.trim() || !newUrl.trim()}
+            >
+              {creating ? 'Creating…' : 'Create Webhook'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Modal shell ───────────────────────────────────────────────────────────────
 
 // ── Shared mini-components ────────────────────────────────────────────────────
@@ -1228,7 +1555,6 @@ function AdminTab({ isOwner }: { isOwner: boolean }) {
   const [maxMembers,           setMaxMembers]           = useState('0');
   const [minAccountAgeDays,    setMinAccountAgeDays]    = useState('0');
   const [requireEmailVerified, setRequireEmailVerified] = useState(false);
-  const [requirePhoneVerified, setRequirePhoneVerified] = useState(false);
   const [memberSave, setMemberSave] = useState<SaveState>('idle');
   const [memberErr,  setMemberErr]  = useState('');
 
@@ -1266,7 +1592,6 @@ function AdminTab({ isOwner }: { isOwner: boolean }) {
       setMaxMembers(String(s.max_members));
       setMinAccountAgeDays(String(s.min_account_age_days));
       setRequireEmailVerified(s.require_email_verified);
-      setRequirePhoneVerified(s.require_phone_verified);
       setMaxMessageLength(String(s.max_message_length));
       setMaxUploadSize(s.max_upload_size);
       setAllowBots(s.allow_bots);
@@ -1582,14 +1907,16 @@ export default function ServerSettingsModal({ serverName, onClose, onRefresh, in
     });
   }, []);
 
-  const NAV_ITEMS: { id: Tab; label: string; ownerOnly?: boolean }[] = [
+  const NAV_ITEMS = ([
     { id: 'overview',   label: 'Overview' },
     { id: 'categories', label: 'Categories' },
     { id: 'channels',   label: 'Channels' },
     { id: 'roles',      label: 'Roles' },
     { id: 'invites',    label: 'Invites' },
     { id: 'admin',      label: 'Admin Settings', ownerOnly: true },
-  ].filter(item => !item.ownerOnly || isOwner);
+    { id: 'bots',       label: 'Bots',           ownerOnly: true },
+    { id: 'webhooks',   label: 'Webhooks',        ownerOnly: true },
+  ] as { id: Tab; label: string; ownerOnly?: boolean }[]).filter(item => !item.ownerOnly || isOwner);
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
@@ -1641,6 +1968,12 @@ export default function ServerSettingsModal({ serverName, onClose, onRefresh, in
           )}
           {tab === 'admin' && (
             <AdminTab isOwner={isOwner} />
+          )}
+          {tab === 'bots' && (
+            <BotsTab isOwner={isOwner} />
+          )}
+          {tab === 'webhooks' && (
+            <WebhooksTab isOwner={isOwner} />
           )}
         </div>
       </div>

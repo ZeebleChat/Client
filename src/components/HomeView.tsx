@@ -4,7 +4,6 @@
  * Includes WebSocket for real-time DM updates.
  */
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
 import {
   fetchFriends,
   sendFriendRequest,
@@ -19,7 +18,9 @@ import {
   type ApiFriendRequest,
   type ApiDmMessage,
   type ApiAttachment,
+  type ApiChannel,
 } from '../api';
+import { useVoice } from '../hooks/useVoice';
 import { getBeamIdentity } from '../auth';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAttachmentBlobUrl } from '../hooks/useAttachmentBlobUrl';
@@ -29,7 +30,10 @@ import UserAvatar from './UserAvatar';
 import EmojiPicker, { type EmojiClickData, Theme } from 'emoji-picker-react';
 import GiphyPicker from './GiphyPicker';
 import { searchEmojis, type EmojiEntry } from './emojiData';
+import { statusClass } from '../types';
+import UserFooter from './UserFooter';
 import styles from './HomeView.module.css';
+
 
 const NOTIFIED_FR_KEY = 'zbl_notified_fr_ids';
 function getNotifiedFrIds(): Set<string | number> {
@@ -184,6 +188,13 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const [emojiQuery, setEmojiQuery] = useState<string | null>(null);
   const [emojiIdx, setEmojiIdx] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<PendingDmFile[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIdx, setSearchIdx] = useState(0);
+  const [callStatus, setCallStatus] = useState<'idle' | 'ringing-out' | 'ringing-in' | 'connected'>('idle');
+  const callStatusRef = useRef<'idle' | 'ringing-out' | 'ringing-in' | 'connected'>('idle');
+
+  const { voiceState, joinVoice, leaveVoice, toggleMute, handleVoiceAudio } = useVoice();
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -191,7 +202,23 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const gifBtnRef = useRef<HTMLButtonElement>(null);
   const gifPickerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const wsRef = useRef(ws);
+  useEffect(() => { wsRef.current = ws; }, [ws]);
   const myBeam = getBeamIdentity();
+
+  function setCall(s: 'idle' | 'ringing-out' | 'ringing-in' | 'connected') {
+    callStatusRef.current = s;
+    setCallStatus(s);
+  }
+
+  const dmVoiceSendFn = useCallback((msg: Record<string, unknown>) => {
+    const sock = wsRef.current;
+    if (!sock || sock.readyState !== WebSocket.OPEN) return;
+    if (msg.type === 'voice_audio') {
+      sock.send(JSON.stringify({ type: 'dm_voice_audio', to: beamIdentity, data: msg.data }));
+    }
+  }, [beamIdentity]);
 
   const emojiMatches = useMemo<EmojiEntry[]>(() => {
     if (emojiQuery === null || emojiQuery.length < 1) return [];
@@ -208,6 +235,22 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     return { ...msg, isFirst, newDay };
   }), [messages]);
 
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return annotated
+      .map((msg, i) => ({ msg, i }))
+      .filter(({ msg }) => typeof msg.content === 'string' && msg.content.toLowerCase().includes(q))
+      .map(({ i }) => i);
+  }, [searchQuery, annotated]);
+
+  useEffect(() => {
+    if (searchMatches.length === 0) return;
+    const matchMsgIdx = searchMatches[Math.min(searchIdx, searchMatches.length - 1)];
+    const el = messagesRef.current?.querySelector(`[data-msgrow="${matchMsgIdx}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [searchIdx, searchMatches]);
+
   useEffect(() => {
     setLoading(true);
     fetchDMs(beamIdentity).then(msgs => {
@@ -221,6 +264,31 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     const handler = (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
+
+        // ── Call signaling ────────────────────────────────────────────────────
+        if (data.type === 'dm_call_invite' && data.from === beamIdentity) {
+          setCall('ringing-in');
+          return;
+        }
+        if (data.type === 'dm_call_answer' && data.from === beamIdentity) {
+          if (data.accepted) {
+            const fakeChannel: ApiChannel = { id: `dm:${beamIdentity}`, name: displayName, type: 'voice' };
+            joinVoice(fakeChannel, dmVoiceSendFn).then(() => setCall('connected'));
+          } else {
+            setCall('idle');
+          }
+          return;
+        }
+        if (data.type === 'dm_call_end' && data.from === beamIdentity) {
+          leaveVoice();
+          setCall('idle');
+          return;
+        }
+        if (data.type === 'dm_voice_audio' && data.from === beamIdentity) {
+          handleVoiceAudio(data.from as string, 'dm', data.data as string);
+          return;
+        }
+
         const sender = data.from ?? data.sender_beam ?? '';
         const recipient = data.to ?? data.recipient_beam ?? '';
         // DirectMessage has no "type" field — detect by presence of sender + recipient.
@@ -393,6 +461,80 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
     if (e.key === 'Enter') handleSend();
   }
 
+  // End any active call when the conversation partner changes.
+  useEffect(() => {
+    return () => {
+      if (callStatusRef.current !== 'idle') {
+        wsRef.current?.send(JSON.stringify({ type: 'dm_call_end', to: beamIdentity }));
+        leaveVoice();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beamIdentity]);
+
+  function startCall() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'dm_call_invite', to: beamIdentity }));
+    setCall('ringing-out');
+  }
+
+  async function acceptCall() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'dm_call_answer', to: beamIdentity, accepted: true }));
+    const fakeChannel: ApiChannel = { id: `dm:${beamIdentity}`, name: displayName, type: 'voice' };
+    await joinVoice(fakeChannel, dmVoiceSendFn);
+    setCall('connected');
+  }
+
+  function declineCall() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'dm_call_answer', to: beamIdentity, accepted: false }));
+    setCall('idle');
+  }
+
+  async function endCall() {
+    wsRef.current?.send(JSON.stringify({ type: 'dm_call_end', to: beamIdentity }));
+    await leaveVoice();
+    setCall('idle');
+  }
+
+  function escapeRegex(s: string) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function highlightText(text: string, query: string) {
+    if (!query.trim()) return text;
+    const parts = text.split(new RegExp(`(${escapeRegex(query)})`, 'gi'));
+    return parts.map((part, idx) =>
+      part.toLowerCase() === query.toLowerCase()
+        ? <mark key={idx} className={styles.searchHighlight}>{part}</mark>
+        : part
+    );
+  }
+
+  function goSearchNext() {
+    if (searchMatches.length === 0) return;
+    setSearchIdx(i => (i + 1) % searchMatches.length);
+  }
+
+  function goSearchPrev() {
+    if (searchMatches.length === 0) return;
+    setSearchIdx(i => (i - 1 + searchMatches.length) % searchMatches.length);
+  }
+
+  function openSearch() {
+    setSearchOpen(true);
+    setSearchQuery('');
+    setSearchIdx(0);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchIdx(0);
+  }
+
   return (
     <div className={styles.dmPanelOuter}>
     <div className={styles.dmPanel}>
@@ -401,6 +543,26 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
         <span className={styles.dmHeaderName}>{displayName}</span>
         <span className={styles.dmHeaderSep}>—</span>
         <span className={styles.dmHeaderBeam}>{beamIdentity}</span>
+        <button
+          className={`${styles.dmHeaderIconBtn} ${searchOpen ? styles.dmHeaderIconBtnActive : ''}`}
+          title="Search in conversation"
+          onClick={openSearch}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </button>
+        <button
+          className={`${styles.dmHeaderIconBtn} ${callStatus !== 'idle' ? styles.dmHeaderIconBtnCall : ''}`}
+          title={callStatus === 'connected' ? `In call with ${displayName}` : `Voice call`}
+          onClick={callStatus === 'idle' ? startCall : callStatus === 'connected' ? endCall : undefined}
+          disabled={callStatus === 'ringing-out' || callStatus === 'ringing-in'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.57 3.4 2 2 0 0 1 3.54 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.5a16 16 0 0 0 6 6l.88-.88a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.28 16l.64.92z"/>
+          </svg>
+        </button>
         <button
           className={`${styles.dmHeaderIconBtn} ${profileOpen ? styles.dmHeaderIconBtnActive : ''}`}
           title={profileOpen ? 'Hide profile' : 'Show profile'}
@@ -413,6 +575,120 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
         </button>
       </div>
 
+      {searchOpen && (
+        <div className={styles.dmSearchBar}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={styles.dmSearchIcon}>
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            ref={searchInputRef}
+            className={styles.dmSearchInput}
+            placeholder="Search messages…"
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setSearchIdx(0); }}
+            onKeyDown={e => {
+              if (e.key === 'Escape') closeSearch();
+              if (e.key === 'Enter') { e.shiftKey ? goSearchPrev() : goSearchNext(); }
+            }}
+          />
+          {searchQuery && (
+            <span className={styles.dmSearchCount}>
+              {searchMatches.length > 0 ? `${searchIdx + 1} / ${searchMatches.length}` : 'No results'}
+            </span>
+          )}
+          <button className={styles.dmSearchNav} onClick={goSearchPrev} disabled={searchMatches.length === 0} title="Previous (Shift+Enter)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="18 15 12 9 6 15"/>
+            </svg>
+          </button>
+          <button className={styles.dmSearchNav} onClick={goSearchNext} disabled={searchMatches.length === 0} title="Next (Enter)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <button className={styles.dmSearchClose} onClick={closeSearch} title="Close search">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* ── Outgoing call / in-call bar ─────────────────────────────────── */}
+      {(callStatus === 'ringing-out' || callStatus === 'connected') && (
+        <div className={`${styles.dmCallBar} ${callStatus === 'connected' ? styles.dmCallBarActive : ''}`}>
+          {callStatus === 'ringing-out' && (
+            <>
+              <span className={styles.dmCallBarPulse} />
+              <span className={styles.dmCallBarLabel}>Calling {displayName}…</span>
+              <button className={styles.dmCallEndBtn} onClick={endCall} title="Cancel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </>
+          )}
+          {callStatus === 'connected' && (
+            <>
+              <div className={styles.dmCallMicWrap}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {voiceState.isMuted
+                    ? <><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>
+                    : <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>
+                  }
+                </svg>
+                <div className={styles.dmCallMicBar} style={{ width: `${voiceState.micLevel}%` }} />
+              </div>
+              <span className={styles.dmCallBarLabel}>
+                {voiceState.status === 'connecting' ? 'Connecting…' : `In call · ${displayName}`}
+              </span>
+              <button
+                className={`${styles.dmCallBtn} ${voiceState.isMuted ? styles.dmCallBtnMuted : ''}`}
+                onClick={toggleMute}
+                title={voiceState.isMuted ? 'Unmute' : 'Mute'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  {voiceState.isMuted
+                    ? <><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>
+                    : <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>
+                  }
+                </svg>
+              </button>
+              <button className={styles.dmCallEndBtn} onClick={endCall} title="End call">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.45-3.45m-2.26-5.45A19.79 19.79 0 0 1 2.15 5.18 2 2 0 0 1 3.54 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10.5"/><line x1="23" y1="1" x2="1" y2="23"/>
+                </svg>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Incoming call overlay ─────────────────────────────────────────── */}
+      {callStatus === 'ringing-in' && (
+        <div className={styles.dmIncomingCall}>
+          <UserAvatar name={displayName} size={52} />
+          <div className={styles.dmIncomingName}>{displayName}</div>
+          <div className={styles.dmIncomingHint}>Incoming voice call</div>
+          <div className={styles.dmIncomingActions}>
+            <button className={styles.dmAcceptBtn} onClick={acceptCall}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.57 3.4 2 2 0 0 1 3.54 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.5a16 16 0 0 0 6 6l.88-.88a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+              Accept
+            </button>
+            <button className={styles.dmDeclineBtn} onClick={declineCall}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.45-3.45m-2.26-5.45A19.79 19.79 0 0 1 2.15 5.18 2 2 0 0 1 3.54 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10.5"/><line x1="23" y1="1" x2="1" y2="23"/>
+              </svg>
+              Decline
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className={styles.dmMessages} ref={messagesRef}>
         {loading && <div className={styles.emptyState}>Loading…</div>}
         {!loading && messages.length === 0 && (
@@ -422,8 +698,10 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
             <div className={styles.dmEmptyHint}>Start your conversation with {displayName}.</div>
           </div>
         )}
-        {annotated.map(msg => {
+        {annotated.map((msg, i) => {
           const isMine = msg.from === myBeam;
+          const isCurrentMatch = searchMatches.length > 0 && searchMatches[searchIdx] === i;
+          const isMatch = searchMatches.includes(i);
           return (
             <Fragment key={String(msg.id)}>
               {msg.newDay && (
@@ -431,7 +709,10 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
                   <span>{formatDateLabel(msg.created_at)}</span>
                 </div>
               )}
-              <div className={`${styles.msgRow} ${!msg.isFirst ? styles.msgGrouped : ''}`}>
+              <div
+                className={`${styles.msgRow} ${!msg.isFirst ? styles.msgGrouped : ''} ${isCurrentMatch ? styles.msgMatchCurrent : isMatch ? styles.msgMatchHighlight : ''}`}
+                data-msgrow={i}
+              >
                 <div className={styles.msgAvatarCol}>
                   {msg.isFirst && <UserAvatar name={msg.from} size={40} />}
                 </div>
@@ -446,7 +727,7 @@ function DmPanel({ beamIdentity, displayName, ws }: DmPanelProps) {
                   )}
                   {isGifUrl(msg.content)
                     ? <img src={msg.content} alt="GIF" className={styles.dmAttachImg} />
-                    : msg.content && <div className={styles.msgText}>{msg.content}</div>
+                    : msg.content && <div className={styles.msgText}>{highlightText(msg.content, searchQuery)}</div>
                   }
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className={styles.dmMsgAttachments}>
@@ -654,7 +935,7 @@ function FriendsPanel({ friends, requests, onMessage, onAddFriend, onRefresh }: 
             <div key={f.beam_identity} className={styles.friendRow}>
               <div className={styles.friendAvatarWrap}>
                 <UserAvatar name={name} avatarId={avatarId} size={38} />
-                <div className={`${styles.statusDot} ${f.status === 'online' ? styles.dotOnline : styles.dotOffline}`} />
+                <div className={`${styles.statusDot} ${styles[statusClass(f.status)]}`} />
               </div>
               <div className={styles.friendInfo}>
                 <div className={styles.friendName}>{name}</div>
@@ -805,6 +1086,7 @@ interface DmConversation {
   displayName: string;
   avatarId?: string | null;
   lastSnippet?: string;
+  status?: string;
 }
 
 interface DmSidebarProps {
@@ -838,30 +1120,7 @@ function DmSidebar({
   onToggleMute,
   onToggleDeafen,
 }: DmSidebarProps) {
-  const identity = getBeamIdentity();
   const [search, setSearch] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [qrOpen, setQrOpen] = useState(false);
-  const qrRef = useRef<HTMLDivElement>(null);
-
-  const handleCopyId = useCallback(() => {
-    if (!identity) return;
-    navigator.clipboard.writeText(identity).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [identity]);
-
-  useEffect(() => {
-    if (!qrOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (qrRef.current && !qrRef.current.contains(e.target as Node)) {
-        setQrOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [qrOpen]);
 
   const filtered = conversations.filter(c =>
     c.displayName.toLowerCase().includes(search.toLowerCase()) ||
@@ -939,7 +1198,10 @@ function DmSidebar({
             className={`${styles.dmConvItem} ${activeDm === c.beamIdentity ? styles.dmConvActive : ''}`}
             onClick={() => onSelectDm(c.beamIdentity, c.displayName)}
           >
-            <UserAvatar name={c.displayName} avatarId={c.avatarId} size={34} />
+            <div className={styles.dmConvAvatarWrap}>
+              <UserAvatar name={c.displayName} avatarId={c.avatarId} size={34} />
+              <div className={`${styles.dmConvDot} ${styles[statusClass(c.status)]}`} />
+            </div>
             <div className={styles.convInfo}>
               <div className={styles.convName}>{c.displayName}</div>
               {c.lastSnippet && (
@@ -950,7 +1212,7 @@ function DmSidebar({
         ))}
       </div>
 
-      {/* Footer: VC bar + user card */}
+      {/* Footer: VC bar (when active) + shared user card */}
       <div className={styles.dmFooter}>
         {voiceChannel && (
           <div className={styles.dmVoiceBar}>
@@ -1003,51 +1265,7 @@ function DmSidebar({
             )}
           </div>
         )}
-        <div className={styles.dmUserCard}>
-          <div className={styles.dmUfAvatarWrap}>
-            <UserAvatar name={identity} size={34} radius={10} className={styles.dmUfAvatar} />
-            <div className={styles.dmUfStat} />
-          </div>
-          <div className={styles.dmUfInfo}>
-            <div
-              className={styles.dmUfName}
-              title={copied ? 'Copied!' : 'Click to copy'}
-              onClick={handleCopyId}
-              style={{ cursor: 'pointer', userSelect: 'none' }}
-            >
-              {copied ? (
-                <span style={{ color: 'var(--green)', fontSize: 11, fontWeight: 700 }}>Copied!</span>
-              ) : (identity || 'Me')}
-            </div>
-            <div className={styles.dmUfId}>Online</div>
-          </div>
-          <div style={{ position: 'relative' }} ref={qrRef}>
-            <button
-              className={styles.dmIconBtn}
-              title="Show friend QR code"
-              onClick={() => setQrOpen(v => !v)}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                <path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/>
-              </svg>
-            </button>
-            {qrOpen && identity && (
-              <div className={styles.dmQrPopup}>
-                <div className={styles.dmQrLabel}>Share to add as friend</div>
-                <div className={styles.dmQrCode}>
-                  <QRCodeSVG value={identity} size={150} bgColor="#ffffff" fgColor="#111111" level="M" />
-                </div>
-                <div className={styles.dmQrBeam}>{identity}</div>
-                <button className={styles.dmQrCopyBtn} onClick={() => navigator.clipboard.writeText(identity)}>
-                  Copy ID
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <UserFooter />
       </div>
     </div>
   );
@@ -1055,7 +1273,7 @@ function DmSidebar({
 
 // ── Main HomeView ──────────────────────────────────────────────────────────────
 
-export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onLeaveVoice }: Props) {
+export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onLeaveVoice, voiceMuted, voiceDeafened, onToggleMute, onToggleDeafen }: Props) {
   const [panel, setPanel] = useState<Panel>('friends');
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [requests, setRequests] = useState<ApiFriendRequest[]>([]);
@@ -1072,6 +1290,7 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
       beamIdentity: f.beam_identity,
       displayName: f.display_name || f.beam_identity,
       avatarId: f.avatar_attachment_id != null ? String(f.avatar_attachment_id) : null,
+      status: f.status,
     }));
     setConversations(convs);
   }, [friends]);
@@ -1171,6 +1390,10 @@ export default function HomeView({ onOpenAccount, onAddServer, voiceChannel, onL
         onAddServer={onAddServer}
         voiceChannel={voiceChannel}
         onLeaveVoice={onLeaveVoice}
+        voiceMuted={voiceMuted}
+        voiceDeafened={voiceDeafened}
+        onToggleMute={onToggleMute}
+        onToggleDeafen={onToggleDeafen}
       />
 
       <div className={styles.mainArea}>

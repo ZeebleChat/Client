@@ -30,7 +30,7 @@ interface Props {
 
 // ── Avatar helper ─────────────────────────────────────────────────────────────
 
-function StaffAvatar({ name, avatarId, size = 40 }: { name: string; avatarId?: number | null; size?: number }) {
+function StaffAvatar({ name, avatarId, size = 40 }: { name: string; avatarId?: string | number | null; size?: number }) {
   if (avatarId) {
     return (
       <img

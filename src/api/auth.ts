@@ -14,10 +14,12 @@ export async function loginReq(
   credential: string,
   password: string,
   useEmail: boolean,
+  totpCode?: string,
 ): Promise<LoginResult> {
-  const body = useEmail
+  const body: Record<string, string> = useEmail
     ? { email: credential, password }
     : { beam_identity: credential, password };
+  if (totpCode) body.totp_code = totpCode;
   const res = await fetch(`${getAuthUrl()}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-import { getAuthUrl, getServerUrl, isZcloudUrl } from '../config';
+import { getAuthUrl, getServerUrl } from '../config';
 import { getChatToken, getToken, getBeamIdentity } from '../auth';
 import { authedFetch, safeJson } from './core';
 

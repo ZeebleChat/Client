@@ -53,7 +53,7 @@ export default function Members({ groups, onDm }: Props) {
                   </div>
                   <div className={styles.memInfo}>
                     <div className={styles.memU} style={color ? { color } : undefined}>
-                      {shortName(member.name)}
+                      {member.displayName || shortName(member.name)}
                       {member.is_owner && (
                         <span title="Server Owner" style={{ marginLeft: 4, fontSize: 11, color: '#f59e0b' }}>👑</span>
                       )}

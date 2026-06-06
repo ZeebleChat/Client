@@ -6,9 +6,8 @@
  * - Drag-and-drop reordering
  * - User identity footer with QR code for adding friends
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { QRCodeSVG } from 'qrcode.react';
 import type { SidebarCategory } from '../types';
 import type { ApiChannel } from '../api';
 import type { Participant } from '../hooks/useVoice';
@@ -17,6 +16,7 @@ import { useAttachmentBlobUrl } from '../hooks/useAttachmentBlobUrl';
 import { getServerUrl } from '../config';
 import { getBeamIdentity } from '../auth';
 import UserAvatar from './UserAvatar';
+import UserFooter from './UserFooter';
 import styles from './Sidebar.module.css';
 
 interface Props {
@@ -404,99 +404,6 @@ type DragItem =
   | { kind: 'cat'; catId: string | number }
   | { kind: 'ch'; chId: string | number; catId: string | number; chType: 'text' | 'voice' | 'arena' | 'board' };
 
-// ── Footer bar ────────────────────────────────────────────────────────────────
-
-function FooterBar({ identity }: { identity: string }) {
-  const [copied, setCopied] = useState(false);
-  const [qrOpen, setQrOpen] = useState(false);
-  const qrRef = useRef<HTMLDivElement>(null);
-  const [displayName, setDisplayName] = useState(
-    localStorage.getItem('cached_display_name') || identity
-  );
-
-  useEffect(() => {
-    const handler = () => {
-      setDisplayName(localStorage.getItem('cached_display_name') || identity);
-    };
-    window.addEventListener('zeeble:display-name-changed', handler);
-    return () => window.removeEventListener('zeeble:display-name-changed', handler);
-  }, [identity]);
-
-  const handleCopy = useCallback(() => {
-    if (!identity) return;
-    navigator.clipboard.writeText(identity).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [identity]);
-
-  // Close QR popup on outside click
-  useEffect(() => {
-    if (!qrOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (qrRef.current && !qrRef.current.contains(e.target as Node)) {
-        setQrOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [qrOpen]);
-
-  return (
-    <div className={styles.footer}>
-      <div className={styles.ufAvatarWrap}>
-        <UserAvatar name={identity} size={34} radius={10} className={styles.ufAvatar} />
-        <div className={styles.ufStat} />
-      </div>
-
-      <div className={styles.ufInfo}>
-        <div
-          className={styles.ufName}
-          title={copied ? 'Copied!' : 'Click to copy'}
-          onClick={handleCopy}
-          style={{ cursor: 'pointer', userSelect: 'none' }}
-        >
-          {copied ? (
-            <span style={{ color: 'var(--green)', fontSize: 11, fontWeight: 700 }}>Copied!</span>
-          ) : (displayName || identity || 'Me')}
-        </div>
-        <div className={styles.ufId}>Online</div>
-      </div>
-
-      {/* QR button */}
-      <div style={{ position: 'relative' }} ref={qrRef}>
-        <button
-          className={styles.iconBtn}
-          title="Show friend QR code"
-          onClick={() => setQrOpen(v => !v)}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="3" width="7" height="7" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/>
-            <path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/>
-          </svg>
-        </button>
-
-        {qrOpen && identity && (
-          <div className={styles.qrPopup}>
-            <div className={styles.qrPopupLabel}>Share to add as friend</div>
-            <div className={styles.qrPopupCode}>
-              <QRCodeSVG value={identity} size={150} bgColor="#ffffff" fgColor="#111111" level="M" />
-            </div>
-            <div className={styles.qrPopupBeam}>{identity}</div>
-            <button
-              className={styles.qrCopyBtn}
-              onClick={() => { navigator.clipboard.writeText(identity); }}
-            >
-              Copy ID
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ── Main Sidebar ──────────────────────────────────────────────────────────────
 
@@ -1198,7 +1105,7 @@ export default function Sidebar({
       )}
 
       {/* Footer */}
-      <FooterBar identity={identity} />
+      <UserFooter />
 
       {leaveModalOpen && (
         <div style={{

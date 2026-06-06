@@ -4,7 +4,8 @@ import { authedFetch, unwrapArray, safeJson } from './core';
 // ── Members ───────────────────────────────────────────────────────────────────
 
 export interface ApiMemberUser {
-  name: string;
+  name: string;           // always the full beam identity (e.g. "creeper7»l0na6")
+  displayName?: string;   // server-side display name override, if set
   role?: string | null;
   status?: string;
   avatar?: string | number | null;
@@ -40,7 +41,8 @@ function normalizeFlatMembers(members: unknown[]): ApiMemberGroup[] {
     const online = flat.filter(m => m.status === 'online');
     const offline = flat.filter(m => m.status !== 'online');
     const toUser = (m: typeof flat[0]): ApiMemberUser => ({
-      name: m.display_name?.trim() || m.beam_identity,
+      name: m.beam_identity,
+      displayName: m.display_name?.trim() || undefined,
       role: m.role ?? null,
       status: m.status,
       avatar: m.avatar != null ? String(m.avatar) : null,

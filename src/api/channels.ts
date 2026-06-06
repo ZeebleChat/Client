@@ -50,10 +50,9 @@ export async function createChannel(
   position = 0
 ): Promise<{ ok: boolean; data?: ApiChannel; error?: string }> {
   try {
-    const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     const res = await authedFetch(`${getServerUrl()}/v1/channels`, {
       method: 'POST',
-      body: JSON.stringify({ id, name, type, category_id: categoryId, position, topic: '' }),
+      body: JSON.stringify({ name, type, category_id: categoryId, position, topic: '' }),
     });
     const data = await safeJson(res);
     return res.ok ? { ok: true, data: data as unknown as ApiChannel } : { ok: false, error: data.error as string };

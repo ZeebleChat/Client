@@ -26,17 +26,10 @@ export function sanitizeServerUrl(raw: string | null | undefined, fallback: stri
   }
 }
 
-export const getAuthUrl = (): string =>
-  sanitizeServerUrl(localStorage.getItem('auth_server_url'), ENV_AUTH_URL);
-
-export const getDmUrl = (): string =>
-  sanitizeServerUrl(localStorage.getItem('dm_server_url'), ENV_DM_URL || getAuthUrl());
-
-export const getZcloudUrl = (): string =>
-  sanitizeServerUrl(localStorage.getItem('zcloud_url'), ENV_ZCLOUD_URL);
-
-export const getMarketUrl = (): string =>
-  sanitizeServerUrl(localStorage.getItem('market_server_url'), ENV_MARKET_URL);
+export const getAuthUrl   = (): string => ENV_AUTH_URL;
+export const getDmUrl     = (): string => ENV_DM_URL || getAuthUrl();
+export const getZcloudUrl = (): string => ENV_ZCLOUD_URL;
+export const getMarketUrl = (): string => ENV_MARKET_URL;
 
 export const getServerUrl = (): string =>
   sanitizeServerUrl(localStorage.getItem('active_server_url'), '');

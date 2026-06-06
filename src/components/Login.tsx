@@ -36,6 +36,16 @@ export default function Login({ onLogin }: Props) {
   const [pinLoading, setPinLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
+  // 2FA step (TOTP)
+  const [twoFactorStep, setTwoFactorStep] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  // Saved credentials for the re-submit with the TOTP code
+  const [pendingCredential, setPendingCredential] = useState('');
+  const [pendingPassword2fa, setPendingPassword2fa] = useState('');
+  const [pendingUseEmail, setPendingUseEmail] = useState(false);
+
   // Forgot password flow
   // Forgot password flow
   const [forgotStep, setForgotStep] = useState<'off' | 'email' | 'reset'>('off');
@@ -62,6 +72,9 @@ export default function Login({ onLogin }: Props) {
     setPendingSession(null);
     setPin('');
     setPinError('');
+    setTwoFactorStep(false);
+    setTwoFactorCode('');
+    setTwoFactorError('');
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -70,6 +83,7 @@ export default function Login({ onLogin }: Props) {
 
     if (!isRegister && !identity.trim()) { setError('Beam identity or email is required'); return; }
     if (!password) { setError('Password is required'); return; }
+    if (isRegister && !displayName.trim()) { setError('Username is required'); return; }
     if (isRegister && password.length < 8) { setError('Password must be at least 8 characters'); return; }
     if (isRegister && password !== confirmPassword) { setError('Passwords do not match'); return; }
     if (isRegister && !tosAccepted) { setError('You must agree to the Terms of Service'); return; }
@@ -89,9 +103,21 @@ export default function Login({ onLogin }: Props) {
       }
 
       if (!result.ok || !result.data?.token) {
-        setError(result.data && 'error' in result.data
+        const errText = result.data && 'error' in result.data
           ? String((result.data as { error?: string }).error)
-          : isRegister ? 'Registration failed' : 'Invalid credentials');
+          : isRegister ? 'Registration failed' : 'Invalid credentials';
+        // Server signals that TOTP is required — switch to the 2FA step.
+        // Accept both the new sentinel ("totp_required") and the old message
+        // that the unpatched server returns when no code is supplied.
+        if (errText === 'totp_required' || errText === 'Invalid or missing 2FA code') {
+          const cred = identity.trim();
+          setPendingCredential(cred);
+          setPendingPassword2fa(password);
+          setPendingUseEmail(cred.includes('@'));
+          setTwoFactorStep(true);
+          return;
+        }
+        setError(errText);
         return;
       }
 
@@ -102,7 +128,11 @@ export default function Login({ onLogin }: Props) {
 
       if (isRegister) {
         // Send the PIN and move to the verify step
-        await sendEmailPinReq(result.data.token, email.trim());
+        const pinResult = await sendEmailPinReq(result.data.token, email.trim());
+        if (!pinResult.ok) {
+          setError(pinResult.error || 'Failed to send verification email — please try again');
+          return;
+        }
         setPendingToken(result.data.token);
         setPendingSession(result.data);
         setVerifyStep(true);
@@ -135,6 +165,25 @@ export default function Login({ onLogin }: Props) {
       saveSession(pendingSession);
       if (rememberMe) await persistSession();
     }
+    onLogin();
+  }
+
+  async function handleTotpSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!twoFactorCode.trim()) { setTwoFactorError('Please enter your 6-digit code'); return; }
+    setTwoFactorLoading(true);
+    setTwoFactorError('');
+    const result = await loginReq(pendingCredential, pendingPassword2fa, pendingUseEmail, twoFactorCode.trim());
+    setTwoFactorLoading(false);
+    if (!result.ok || !result.data?.token) {
+      const errText = result.data && 'error' in result.data
+        ? String((result.data as { error?: string }).error)
+        : 'Invalid code';
+      setTwoFactorError(errText === 'totp_required' ? 'Please enter your 2FA code' : errText || 'Invalid code');
+      return;
+    }
+    saveSession(result.data);
+    if (rememberMe) await persistSession();
     onLogin();
   }
 
@@ -271,6 +320,48 @@ export default function Login({ onLogin }: Props) {
     );
   }
 
+  if (twoFactorStep) {
+    return (
+      <div className={styles.screen}>
+        <div className={styles.card}>
+          <div className={styles.brand}>Z</div>
+          <h1 className={styles.title}>Two-Factor Auth</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-3)', textAlign: 'center', margin: '0 0 8px' }}>
+            Enter the 6-digit code from your authenticator app,<br />or a recovery code.
+          </p>
+          <form className={styles.form} onSubmit={handleTotpSubmit}>
+            <div className={styles.field}>
+              <label className={styles.label}>Authentication Code</label>
+              <input
+                className={styles.input}
+                type="text"
+                inputMode="numeric"
+                maxLength={8}
+                placeholder="000000"
+                value={twoFactorCode}
+                onChange={e => setTwoFactorCode(e.target.value.replace(/[^0-9A-Za-z]/g, ''))}
+                autoComplete="one-time-code"
+                autoFocus
+                style={{ letterSpacing: '0.25em', textAlign: 'center', fontSize: 20 }}
+              />
+            </div>
+            {twoFactorError && <div className={styles.error}>{twoFactorError}</div>}
+            <button className={styles.btn} type="submit" disabled={twoFactorLoading}>
+              {twoFactorLoading ? 'Verifying…' : 'Verify'}
+            </button>
+            <button
+              type="button"
+              style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 12, cursor: 'pointer', textAlign: 'center' }}
+              onClick={() => { setTwoFactorStep(false); setTwoFactorCode(''); setTwoFactorError(''); }}
+            >
+              ← Back to Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (verifyStep) {
     return (
       <div className={styles.screen}>
@@ -341,7 +432,7 @@ export default function Login({ onLogin }: Props) {
         <form className={styles.form} onSubmit={handleSubmit}>
           {isRegister && (
             <div className={styles.field}>
-              <label className={styles.label}>Username <span style={{ opacity: 0.5 }}>(optional)</span></label>
+              <label className={styles.label}>Username</label>
               <input
                 className={styles.input}
                 type="text"

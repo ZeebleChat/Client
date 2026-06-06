@@ -5,6 +5,8 @@ import BoardView from '../components/BoardView';
 import Members from '../components/Members';
 import type { ApiChannel, ApiMessage, ApiMemberGroup } from '../api';
 import type { SidebarCategory } from '../types';
+import type { Participant } from '../hooks/useVoice';
+import type { EmojiManifest } from '../resourcePack';
 
 type SidebarProps = React.ComponentProps<typeof Sidebar>;
 
@@ -18,7 +20,7 @@ interface ServerViewProps {
   activeChannel: ApiChannel | null;
   activeVoiceChannelId: string | number | null;
   activeVoiceChannelName: string | null;
-  voiceParticipants: string[];
+  voiceParticipants: Participant[];
   voiceRoomParticipants: Record<string, string[]>;
   voiceMuted: boolean;
   voiceDeafened: boolean;
@@ -32,7 +34,7 @@ interface ServerViewProps {
   roleMap: Record<string, string | null | undefined>;
   isCloudServer: boolean;
   isOwner: boolean;
-  emojiManifest?: unknown;
+  emojiManifest?: EmojiManifest;
   packBaseUrl?: string;
   onSelectChannel: (ch: ApiChannel) => void;
   onJoinVoice: (ch: ApiChannel) => Promise<void>;

@@ -526,10 +526,18 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--green);
   border: 2px solid var(--bg-dark);
   pointer-events: none;
+  /* background driven by .on/.idle/.dnd/.streaming/.offline class */
 }
+
+/* ── Shared status dot colours ──────────────────────────────────────────────── */
+
+.on        { background: var(--green, #22c55e); box-shadow: 0 0 0 2px rgba(34,197,94,.25); }
+.idle      { background: #f59e0b; }
+.dnd       { background: var(--red, #ef4444); }
+.streaming { background: #a855f7; box-shadow: 0 0 0 2px rgba(168,85,247,.25); }
+.offline   { background: var(--text-3); box-shadow: none; }
 
 .ufInfo {
   flex: 1;
@@ -545,6 +553,174 @@
 .ufId {
   font-size: 11px;
   color: var(--text-3);
+}
+
+.footerActive {
+  background: color-mix(in srgb, var(--bg-dark) 80%, white 10%);
+}
+
+/* ── My profile popup ────────────────────────────────────────────────────── */
+
+.myProfilePopup {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  z-index: 300;
+  animation: profileSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes profileSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.myProfileBanner {
+  height: 60px;
+  position: relative;
+}
+
+.myProfileBannerGradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 50%, #0ea5e9 100%);
+}
+
+.myProfileAvatarRow {
+  display: flex;
+  align-items: flex-end;
+  padding: 0 14px;
+  margin-top: -22px;
+  margin-bottom: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.myProfileAvatarWrap {
+  position: relative;
+  display: inline-block;
+  border-radius: 16px;
+  box-shadow: 0 0 0 3px var(--bg-panel);
+}
+
+.myProfileDot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2.5px solid var(--bg-panel);
+  pointer-events: none;
+}
+
+.myProfileInfo {
+  padding: 0 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.myProfileName {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.myProfileBeam {
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.myProfileBeam:hover {
+  color: var(--text-2);
+}
+
+.myProfileDivider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 0 12px 6px;
+}
+
+.myProfileStatusSection {
+  padding: 0 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.myProfileStatusTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  padding: 4px 10px 6px;
+}
+
+.myProfileStatusBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+
+.myProfileStatusBtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.myProfileStatusBtnActive {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.myProfileDotSmall {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.myProfileStatusText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.myProfileStatusLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.myProfileStatusDesc {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
 }
 
 @keyframes fadeInUp {

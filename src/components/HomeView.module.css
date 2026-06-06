@@ -385,6 +385,15 @@
   flex-shrink: 0;
 }
 
+/* ── Shared status dot colours ───────────────────────────────────────────── */
+
+.on        { background: var(--green, #22c55e); box-shadow: 0 0 0 2px rgba(34,197,94,.25); }
+.idle      { background: #f59e0b; }
+.dnd       { background: var(--red, #ef4444); }
+.streaming { background: #a855f7; box-shadow: 0 0 0 2px rgba(168,85,247,.25); }
+.offline   { background: var(--text-3); box-shadow: none; }
+
+/* Friends list dot */
 .statusDot {
   position: absolute;
   bottom: -2px;
@@ -395,8 +404,22 @@
   border: 2px solid var(--bg-panel);
 }
 
-.dotOnline  { background: var(--green); }
-.dotOffline { background: var(--text-3); }
+/* DM conversation list avatar wrap + dot */
+.dmConvAvatarWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.dmConvDot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-panel);
+  pointer-events: none;
+}
 
 .friendInfo {
   flex: 1;
@@ -777,6 +800,276 @@
 .dmHeaderIconBtnActive {
   color: var(--accent);
 }
+
+.dmHeaderIconBtnCall {
+  color: var(--green, #22c55e);
+}
+
+/* ── In-chat search bar ──────────────────────────────────────────────────── */
+
+.dmSearchBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.dmSearchIcon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.dmSearchInput {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text-1);
+  outline: none;
+  font-family: inherit;
+}
+
+.dmSearchInput::placeholder { color: var(--text-3); }
+
+.dmSearchInput:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dmSearchCount {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.dmSearchNav {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.dmSearchNav:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-1);
+}
+
+.dmSearchNav:disabled { opacity: 0.3; cursor: default; }
+
+.dmSearchClose {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.dmSearchClose:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-1);
+}
+
+/* ── Message match highlighting ──────────────────────────────────────────── */
+
+.msgMatchHighlight {
+  background: rgba(250, 204, 21, 0.06);
+}
+
+.msgMatchCurrent {
+  background: rgba(250, 204, 21, 0.14);
+  border-left: 2px solid rgba(250, 204, 21, 0.7);
+}
+
+.searchHighlight {
+  background: rgba(250, 204, 21, 0.35);
+  color: var(--text-1);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
+}
+
+/* ── Call bar (outgoing / in-call) ───────────────────────────────────────── */
+
+.dmCallBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: rgba(34, 197, 94, 0.08);
+  border-bottom: 1px solid rgba(34, 197, 94, 0.18);
+  flex-shrink: 0;
+}
+
+.dmCallBarActive {
+  background: rgba(34, 197, 94, 0.1);
+  border-bottom-color: rgba(34, 197, 94, 0.25);
+}
+
+@keyframes dmCallPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+.dmCallBarPulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green, #22c55e);
+  flex-shrink: 0;
+  animation: dmCallPulse 1.2s ease-in-out infinite;
+}
+
+.dmCallBarLabel {
+  font-size: 12px;
+  color: var(--green, #22c55e);
+  font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dmCallMicWrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--green, #22c55e);
+  flex-shrink: 0;
+}
+
+.dmCallMicBar {
+  height: 4px;
+  min-width: 2px;
+  max-width: 40px;
+  background: var(--green, #22c55e);
+  border-radius: 2px;
+  transition: width 0.08s linear;
+}
+
+.dmCallBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.dmCallBtn:hover { background: rgba(255, 255, 255, 0.12); color: var(--text-1); }
+
+.dmCallBtnMuted { color: var(--red, #ef4444); }
+
+.dmCallEndBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: none;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red, #ef4444);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.dmCallEndBtn:hover { background: rgba(239, 68, 68, 0.28); }
+
+/* ── Incoming call overlay ────────────────────────────────────────────────── */
+
+.dmIncomingCall {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(34, 197, 94, 0.08));
+  border-bottom: 1px solid rgba(34, 197, 94, 0.2);
+  flex-shrink: 0;
+}
+
+.dmIncomingName {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.dmIncomingHint {
+  font-size: 12px;
+  color: var(--green, #22c55e);
+  font-weight: 500;
+}
+
+.dmIncomingActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.dmAcceptBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  border-radius: 6px;
+  border: none;
+  background: var(--green, #22c55e);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+.dmAcceptBtn:hover { opacity: 0.88; }
+
+.dmDeclineBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  border-radius: 6px;
+  border: none;
+  background: var(--red, #ef4444);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+.dmDeclineBtn:hover { opacity: 0.88; }
 
 /* ── Discord-style flat messages ─────────────────────────────────────────── */
 
@@ -1232,9 +1525,9 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--green);
   border: 2px solid var(--bg-dark);
   pointer-events: none;
+  /* background driven by .on/.idle/.dnd/.offline colour class */
 }
 
 .dmUfInfo {
@@ -1254,6 +1547,60 @@
 .dmUfId {
   font-size: 11px;
   color: var(--text-3);
+  position: relative;
+  user-select: none;
+}
+
+/* ── Status picker popup ─────────────────────────────────────────────────── */
+
+.statusPicker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: -12px;
+  background: var(--bg-dark);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.statusPickerItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.statusPickerItem:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-1);
+}
+
+.statusPickerItemActive {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.statusPickerDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .dmIconBtn {
@@ -1335,6 +1682,177 @@
   cursor: pointer;
   transition: opacity 0.15s;
   font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* ── User card active state ──────────────────────────────────────────────── */
+
+.dmUserCardActive {
+  background: var(--bg-main);
+}
+
+/* ── My profile popup ────────────────────────────────────────────────────── */
+
+.myProfilePopup {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  z-index: 300;
+  animation: profileSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes profileSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.myProfileBanner {
+  height: 60px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.myProfileBannerGradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 50%, #0ea5e9 100%);
+}
+
+.myProfileAvatarRow {
+  display: flex;
+  align-items: flex-end;
+  padding: 0 14px;
+  margin-top: -22px;
+  margin-bottom: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.myProfileAvatarWrap {
+  position: relative;
+  display: inline-block;
+  border-radius: 16px;
+  box-shadow: 0 0 0 3px var(--bg-panel);
+}
+
+.myProfileDot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2.5px solid var(--bg-panel);
+  pointer-events: none;
+}
+
+.myProfileInfo {
+  padding: 0 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.myProfileName {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.myProfileBeam {
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.myProfileBeam:hover {
+  color: var(--text-2);
+}
+
+.myProfileDivider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 0 12px 6px;
+}
+
+.myProfileStatusSection {
+  padding: 0 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.myProfileStatusTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  padding: 4px 10px 6px;
+}
+
+.myProfileStatusBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+
+.myProfileStatusBtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.myProfileStatusBtnActive {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.myProfileDotSmall {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.myProfileStatusText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.myProfileStatusLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.myProfileStatusDesc {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
 }
 
 .dmQrCopyBtn:hover { opacity: 0.85; }

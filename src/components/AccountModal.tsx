@@ -52,7 +52,6 @@ import {
 
 const stripePromise = fetchStripePublishableKey().then(key => key ? loadStripe(key) : null);
 import { getBeamIdentity, getToken, saveSession } from '../auth';
-import { ENV_AUTH_URL, ENV_DM_URL, ENV_ZCLOUD_URL, sanitizeServerUrl } from '../config';
 import { setAvatarCache, getAvatarCache, AVATAR_CACHE_EVENT } from '../avatarCache';
 import { useTheme, type Theme } from '../hooks/useTheme';
 import PermissionGate from './PermissionGate';
@@ -1864,17 +1863,6 @@ function applyAccessibility(reduceMotion: boolean, highContrast: boolean, largeT
 // ── App Settings tab ───────────────────────────────────────────────────────────
 
 function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
-  const [authUrl, setAuthUrl] = useState(
-    localStorage.getItem('auth_server_url') || ENV_AUTH_URL
-  );
-  const [dmUrl, setDmUrl] = useState(
-    localStorage.getItem('dm_server_url') || ENV_DM_URL
-  );
-  const [zcloudUrl, setZcloudUrl] = useState(
-    localStorage.getItem('zcloud_url') || ENV_ZCLOUD_URL
-  );
-  const [saved, setSaved] = useState(false);
-  const [urlError, setUrlError] = useState<string | null>(null);
   const [closeToTray, setCloseToTray] = usePref('close_to_tray', false);
 
   // Sync saved pref into Tauri on mount so the setting survives restarts.
@@ -1892,83 +1880,11 @@ function AppSettingsTab({ onOpenDevPanel }: { onOpenDevPanel?: () => void }) {
     }
   }
 
-  function handleSave() {
-    // Validate every non-empty URL before persisting.
-    const entries: [string, string][] = [
-      [authUrl, 'Auth Server'],
-      [dmUrl, 'DM Server'],
-      [zcloudUrl, 'ZCloud URL'],
-    ];
-    for (const [url, label] of entries) {
-      if (url && !sanitizeServerUrl(url, '')) {
-        setUrlError(`${label}: must be a valid http(s) URL (e.g. https://api.example.com)`);
-        return;
-      }
-    }
-    setUrlError(null);
-
-    // Persist or clear each entry (empty → remove key → falls back to ENV default).
-    if (authUrl)   localStorage.setItem('auth_server_url', authUrl.replace(/\/+$/, ''));
-    else           localStorage.removeItem('auth_server_url');
-    if (dmUrl)     localStorage.setItem('dm_server_url', dmUrl.replace(/\/+$/, ''));
-    else           localStorage.removeItem('dm_server_url');
-    if (zcloudUrl) localStorage.setItem('zcloud_url', zcloudUrl.replace(/\/+$/, ''));
-    else           localStorage.removeItem('zcloud_url');
-
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  }
-
   const token = getToken();
 
   return (
     <div className={styles.tabContent}>
-      <div className={styles.sectionTitle}>Server URLs</div>
-
-      <div className={styles.fieldGroup}>
-        <label className={styles.fieldLabel}>Auth Server</label>
-        <input
-          className={styles.input}
-          value={authUrl}
-          onChange={e => setAuthUrl(e.target.value)}
-          placeholder="http://..."
-          spellCheck={false}
-        />
-      </div>
-      <div className={styles.fieldGroup}>
-        <label className={styles.fieldLabel}>DM Server</label>
-        <input
-          className={styles.input}
-          value={dmUrl}
-          onChange={e => setDmUrl(e.target.value)}
-          placeholder="http://..."
-          spellCheck={false}
-        />
-      </div>
-      <div className={styles.fieldGroup}>
-        <label className={styles.fieldLabel}>ZCloud URL</label>
-        <input
-          className={styles.input}
-          value={zcloudUrl}
-          onChange={e => setZcloudUrl(e.target.value)}
-          placeholder="http://..."
-          spellCheck={false}
-        />
-      </div>
-
-      {urlError && (
-        <p style={{ color: 'var(--error, #e05252)', fontSize: 12, margin: '6px 0 0' }}>
-          {urlError}
-        </p>
-      )}
-      <button
-        className={`${styles.saveBtn} ${saved ? styles.saveBtnDone : ''}`}
-        onClick={handleSave}
-      >
-        {saved ? 'Saved!' : 'Save'}
-      </button>
-
-      <div className={styles.sectionTitle} style={{ marginTop: 20 }}>Window Behaviour</div>
+      <div className={styles.sectionTitle}>Window Behaviour</div>
       {isTauri() ? (
         <SettingRow label="Close to tray" sub="Clicking × hides the window instead of quitting">
           <NeuToggle value={closeToTray} onChange={handleCloseToTrayChange} />

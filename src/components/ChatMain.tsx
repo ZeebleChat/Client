@@ -247,6 +247,13 @@ function MessageRow({
                   Edit history
                 </button>
               )}
+              <button className={styles.msgDropdownItem} onClick={() => { setDropdownOpen(false); navigator.clipboard.writeText(String(msg.id)); }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                Copy message ID
+              </button>
               {isMyMsg && (
                 <button className={`${styles.msgDropdownItem} ${styles.msgDropdownItemDanger}`} onClick={() => { setDropdownOpen(false); onDelete(); }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -264,8 +271,13 @@ function MessageRow({
       )}
         <div className={styles.msgMeta}>
           <span className={styles.msgName} style={{ color, cursor: 'pointer' }} onClick={e => onUserClick(e, msg.beam_identity)}>
-            {msg.beam_identity.split('»')[0] || msg.beam_identity}
+            {msg.beam_identity.startsWith('bot:')
+              ? msg.beam_identity.slice(4)
+              : (msg.beam_identity.split('»')[0] || msg.beam_identity)}
           </span>
+          {msg.beam_identity.startsWith('bot:') && (
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', color: '#fff', background: 'var(--accent)', borderRadius: 3, padding: '1px 4px', marginLeft: 4, verticalAlign: 'middle' }}>BOT</span>
+          )}
           <span className={styles.msgTime}>{formatTime(msg.created_at)}</span>
           {msg.edited_at && !isEditing && (
             <button className={styles.editedBtn} onClick={onHistoryToggle} title="View edit history">
@@ -304,7 +316,9 @@ function MessageRow({
               <polyline points="9 17 4 12 9 7"/>
               <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
             </svg>
-            <span className={styles.replyPreviewName}>{replyMsg.beam_identity.split('»')[0]}</span>
+            <span className={styles.replyPreviewName}>
+              {replyMsg.beam_identity.startsWith('bot:') ? replyMsg.beam_identity.slice(4) : replyMsg.beam_identity.split('»')[0]}
+            </span>
             <span className={styles.replyPreviewText}>
               {replyMsg.content ? replyMsg.content.slice(0, 80) + (replyMsg.content.length > 80 ? '…' : '') : '📎 attachment'}
             </span>
@@ -917,7 +931,9 @@ export default function ChatMain({ channelName, channelId, messages, onSend, onR
               <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
             </svg>
             <span>Replying to </span>
-            <span className={styles.replyBannerName}>{replyingTo.beam_identity.split('»')[0]}</span>
+            <span className={styles.replyBannerName}>
+              {replyingTo.beam_identity.startsWith('bot:') ? replyingTo.beam_identity.slice(4) : replyingTo.beam_identity.split('»')[0]}
+            </span>
             <button className={styles.replyBannerClose} onClick={() => setReplyingTo(null)} title="Cancel reply">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>

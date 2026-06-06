@@ -48,7 +48,7 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
     // and browser history.  Instead we send a { type: "auth", token } message
     // as the very first frame after the connection opens, mirroring the pattern
     // used by the channel WebSocket (useWebSocket.ts).
-    const url = `${wsUrl}/ws`;
+    const url = `${wsUrl}/dm/ws`;
     const socket = new WebSocket(url);
     wsRef.current = socket;
 
@@ -101,7 +101,20 @@ export function useDmWebSocket(enabled: boolean): WebSocket | null {
       document.removeEventListener('visibilitychange', handleVisible);
       enabledRef.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
+      // Null wsRef.current BEFORE closing so that the socket's onclose callback
+      // sees wsRef.current !== socket and exits early instead of scheduling a
+      // reconnect.  Also null all handlers to prevent any stale state updates
+      // from firing after the component has unmounted (important under React 18
+      // StrictMode which mounts → cleans up → remounts every component in dev).
+      const dying = wsRef.current;
+      wsRef.current = null;
+      if (dying) {
+        dying.onopen    = null;
+        dying.onmessage = null;
+        dying.onerror   = null;
+        dying.onclose   = null;
+        dying.close();
+      }
     };
   }, [enabled, connect]);
 
